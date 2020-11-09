@@ -7,6 +7,38 @@
 
 public struct PropertyMetadata: Identifiable {
   public struct Content {
+    // Copying from ArgumentDefinition
+    /// This folds the public `ArrayParsingStrategy` and
+    /// `SingleValueParsingStrategy`
+    /// into a single enum.
+    public enum ParsingStrategy {
+      /// Expect the next `SplitArguments.Element` to be
+      /// a value and parse it. Will fail if the next
+      /// input is an option.
+      case nextAsValue
+      /// Parse the next `SplitArguments.Element.value`
+      case scanningForValue
+      /// Parse the next `SplitArguments.Element` as
+      /// a value, regardless of its type.
+      case unconditional
+      /// Parse multiple `SplitArguments.Element.value`
+      /// up to the next non-`.value`
+      case upToNextOption
+      /// Parse all remaining `SplitArguments.Element`
+      /// as values, regardless of its type.
+      case allRemainingInput
+
+      init(_ value: ArgumentDefinition.ParsingStrategy) {
+        switch value {
+        case .nextAsValue: self = .nextAsValue
+        case .scanningForValue: self = .scanningForValue
+        case .unconditional: self = .unconditional
+        case .upToNextOption: self = .upToNextOption
+        case .allRemainingInput: self = .allRemainingInput
+        }
+      }
+    }
+
     public enum Kind {
       case long(String)
       case short(Character)
@@ -17,6 +49,7 @@ public struct PropertyMetadata: Identifiable {
     public let help: ArgumentHelp?
     public let kind: Kind
     public let valueName: String
+    public let parsingStrategy: ParsingStrategy
 
     fileprivate init(_ arg: ArgumentDefinition) {
       let kind: Kind
@@ -34,6 +67,7 @@ public struct PropertyMetadata: Identifiable {
       self.help = arg.help.help
       self.kind = kind
       self.valueName = arg.valueName
+      self.parsingStrategy = ParsingStrategy(arg.parsingStrategy)
     }
 
     fileprivate init() {
