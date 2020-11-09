@@ -78,6 +78,7 @@ public struct PropertyMetadata: Identifiable {
         discussion: "sample discussion",
         valueName: "help value name",
         shouldDisplay: true)
+      self.parsingStrategy = .nextAsValue
     }
   }
 
