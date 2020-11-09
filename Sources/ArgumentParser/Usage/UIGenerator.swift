@@ -6,20 +6,20 @@
 //
 
 public struct PropertyMetadata: Identifiable {
-  public enum Kind {
-    case long(String)
-    case short(Character)
-    case longWithSingleDash(String)
-    case positional
-  }
-
   public struct Content {
+    public enum Kind {
+      case long(String)
+      case short(Character)
+      case longWithSingleDash(String)
+      case positional
+    }
+
     public let help: ArgumentHelp?
     public let kind: Kind
     public let valueName: String
 
     fileprivate init(_ arg: ArgumentDefinition) {
-      let kind: PropertyMetadata.Kind
+      let kind: Kind
       switch arg.kind {
       case .positional: kind = .positional
       case .named(let names):
@@ -35,6 +35,16 @@ public struct PropertyMetadata: Identifiable {
       self.kind = kind
       self.valueName = arg.valueName
     }
+
+    fileprivate init() {
+      self.valueName = "a string"
+      self.kind = .long("a-string")
+      self.help = ArgumentHelp(
+        "sample abstract",
+        discussion: "sample discussion",
+        valueName: "help value name",
+        shouldDisplay: true)
+    }
   }
 
   public let id: String
@@ -42,7 +52,8 @@ public struct PropertyMetadata: Identifiable {
   public let values: [Content]
   public let type: Any.Type
 
-  init?(_ arg: ArgumentSet, key: InputKey, id: String, type: Any.Type) {
+  init?(
+    _ arg: ArgumentSet, key: InputKey, id: String, type: Any.Type) {
     self.type = type
     self.id = id
     self.values = arg.map { Content($0) }
@@ -61,12 +72,13 @@ public struct PropertyMetadata: Identifiable {
     }
   }
 
-  public var abstract: String? {
-    (values.first?.help?.abstract).flatMap { $0.isEmpty ? nil : $0 }  }
-  public var discussion: String? {
-    (values.first?.help?.discussion).flatMap { $0.isEmpty ? nil : $0 } }
-
-  var first: Content { values.first ?? {fatalError("cannot happen")}() }
+  // for testing purposes
+  public init() {
+    self.id = "Hello"
+    self.initialValue = "Hello World"
+    self.type = String.self
+    self.values = [ Content() ]
+  }
 }
 
 private protocol _OptionGroupProtocol {
@@ -91,10 +103,11 @@ private func _parse(_ type: ParsableArguments.Type, key: String = "")
                               childLabel.first == "_" ? 1 : 0))
 
       let nextKey = key + ".\(codingKey)"
+      let childType = Swift.type(of: child.value)
 
-      switch Swift.type(of: child.value) {
-      case let type as _OptionGroupProtocol.Type:
-        return _parse(type._valueType, key: nextKey)
+      switch childType {
+      case let optionGroupType as _OptionGroupProtocol.Type:
+        return _parse(optionGroupType._valueType, key: nextKey)
 
       case is ArgumentSetProvider.Type:
 
@@ -106,7 +119,7 @@ private func _parse(_ type: ParsableArguments.Type, key: String = "")
         let argumentSet = parsed.argumentSet(for: key)
         let metadata = PropertyMetadata(
           argumentSet, key: key, id: nextKey,
-          type: Swift.type(of: child.value))
+          type: childType)
         return metadata.map { [$0] } ?? []
 
       default:
