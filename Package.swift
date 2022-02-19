@@ -17,6 +17,10 @@ var package = Package(
     products: [
         .library(
             name: "ArgumentParser",
+            type: .dynamic,
+            targets: ["ArgumentParser"]),
+        .library(
+            name: "ArgumentParser-auto",
             targets: ["ArgumentParser"]),
     ],
     dependencies: [],
