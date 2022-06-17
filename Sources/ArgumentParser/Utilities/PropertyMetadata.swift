@@ -15,7 +15,7 @@ public struct PropertyMetadata: Identifiable {
       /// Expect the next `SplitArguments.Element` to be
       /// a value and parse it. Will fail if the next
       /// input is an option.
-      case nextAsValue
+      case `default`
       /// Parse the next `SplitArguments.Element.value`
       case scanningForValue
       /// Parse the next `SplitArguments.Element` as
@@ -30,7 +30,7 @@ public struct PropertyMetadata: Identifiable {
 
       init(_ value: ArgumentDefinition.ParsingStrategy) {
         switch value {
-        case .nextAsValue: self = .nextAsValue
+        case .default: self = .default
         case .scanningForValue: self = .scanningForValue
         case .unconditional: self = .unconditional
         case .upToNextOption: self = .upToNextOption
@@ -41,9 +41,12 @@ public struct PropertyMetadata: Identifiable {
 
     public enum Kind {
       case long(String)
-      case short(Character)
+      case short(Character, allowingJoined: Bool = false)
       case longWithSingleDash(String)
       case positional
+      /// A pseudo-argument that takes its value from a property's default value
+      /// instead of from command-line arguments.
+      case `default`
     }
 
     public let help: ArgumentHelp?
@@ -71,12 +74,18 @@ public struct PropertyMetadata: Identifiable {
         switch names.first {
         case .none: fatalError()
         case .long(let value): kind = .long(value)
-        case .short(let value): kind = .short(value)
+        case .short(let value, let joined): kind =
+            .short(value, allowingJoined: joined)
         case .longWithSingleDash(let value): kind = .longWithSingleDash(value)
         }
+      case .default: kind = .default
       }
 
-      self.help = arg.help.help
+      self.help = ArgumentHelp(
+        arg.help.abstract,
+        discussion: arg.help.discussion,
+        valueName: arg.help.valueName,
+        visibility: arg.help.visibility)
       self.kind = kind
       self.valueName = arg.valueName
       self.parsingStrategy = ParsingStrategy(arg.parsingStrategy)
@@ -89,8 +98,8 @@ public struct PropertyMetadata: Identifiable {
         "sample abstract",
         discussion: "sample discussion",
         valueName: "help value name",
-        shouldDisplay: true)
-      self.parsingStrategy = .nextAsValue
+        visibility: .default)
+      self.parsingStrategy = .default
     }
   }
 
