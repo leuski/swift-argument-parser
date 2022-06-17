@@ -10,12 +10,11 @@
 //===----------------------------------------------------------------------===//
 
 import XCTest
-import ArgumentParser
 import ArgumentParserTestHelpers
 
 final class RollDiceExampleTests: XCTestCase {
   func testRollDice() throws {
-    AssertExecuteCommand(command: "roll --times 6")
+    try AssertExecuteCommand(command: "roll --times 6")
   }
   
   func testRollDice_Help() throws {
@@ -31,24 +30,26 @@ final class RollDiceExampleTests: XCTestCase {
           -h, --help              Show help information.
         """
     
-    AssertExecuteCommand(command: "roll -h", expected: helpText)
-    AssertExecuteCommand(command: "roll --help", expected: helpText)
+    try AssertExecuteCommand(command: "roll -h", expected: helpText)
+    try AssertExecuteCommand(command: "roll --help", expected: helpText)
   }
   
   func testRollDice_Fail() throws {
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "roll --times",
       expected: """
             Error: Missing value for '--times <n>'
+            Help:  --times <n>  Rolls the dice <n> times.
             Usage: roll [--times <n>] [--sides <m>] [--seed <seed>] [--verbose]
               See 'roll --help' for more information.
             """,
       exitCode: .validationFailure)
     
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "roll --times ZZZ",
       expected: """
             Error: The value 'ZZZ' is invalid for '--times <n>'
+            Help:  --times <n>  Rolls the dice <n> times.
             Usage: roll [--times <n>] [--sides <m>] [--seed <seed>] [--verbose]
               See 'roll --help' for more information.
             """,

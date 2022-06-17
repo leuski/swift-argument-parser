@@ -12,21 +12,8 @@
 internal struct HelpGenerator {
   static var helpIndent = 2
   static var labelColumnWidth = 26
-  static var systemScreenWidth: Int {
-    _screenWidthOverride ?? _terminalSize().width
-  }
-  
-  internal static var _screenWidthOverride: Int? = nil
-  
-  struct Usage {
-    var components: [String]
-    
-    func rendered(screenWidth: Int) -> String {
-      components
-        .joined(separator: "\n")
-    }
-  }
-  
+  static var systemScreenWidth: Int { _terminalSize().width }
+
   struct Section {
     struct Element: Hashable {
       var label: String
@@ -98,16 +85,16 @@ internal struct HelpGenerator {
   
   var commandStack: [ParsableCommand.Type]
   var abstract: String
-  var usage: Usage
+  var usage: String
   var sections: [Section]
   var discussionSections: [DiscussionSection]
   
-  init(commandStack: [ParsableCommand.Type]) {
+  init(commandStack: [ParsableCommand.Type], visibility: ArgumentVisibility) {
     guard let currentCommand = commandStack.last else {
       fatalError()
     }
     
-    let currentArgSet = ArgumentSet(currentCommand)
+    let currentArgSet = ArgumentSet(currentCommand, visibility: visibility)
     self.commandStack = commandStack
 
     // Build the tool name and subcommand name from the command configuration
@@ -116,10 +103,16 @@ internal struct HelpGenerator {
       toolName = "\(superName) \(toolName)"
     }
 
-    var usageString = UsageGenerator(toolName: toolName, definition: [currentArgSet]).synopsis
-    if !currentCommand.configuration.subcommands.isEmpty {
-      if usageString.last != " " { usageString += " " }
-      usageString += "<subcommand>"
+    if let usage = currentCommand.configuration.usage {
+      self.usage = usage
+    } else {
+      var usage = UsageGenerator(toolName: toolName, definition: [currentArgSet])
+        .synopsis
+      if !currentCommand.configuration.subcommands.isEmpty {
+        if usage.last != " " { usage += " " }
+        usage += "<subcommand>"
+      }
+      self.usage = usage
     }
     
     self.abstract = currentCommand.configuration.abstract
@@ -129,95 +122,74 @@ internal struct HelpGenerator {
       }
       self.abstract += "\n\(currentCommand.configuration.discussion)"
     }
-    
-    self.usage = Usage(components: [usageString])
-    self.sections = HelpGenerator.generateSections(commandStack: commandStack)
+
+    self.sections = HelpGenerator.generateSections(commandStack: commandStack, visibility: visibility)
     self.discussionSections = []
   }
   
-  init(_ type: ParsableArguments.Type) {
-    self.init(commandStack: [type.asCommand])
+  init(_ type: ParsableArguments.Type, visibility: ArgumentVisibility) {
+    self.init(commandStack: [type.asCommand], visibility: visibility)
   }
 
-  static func generateSections(commandStack: [ParsableCommand.Type]) -> [Section] {
+  private static func generateSections(commandStack: [ParsableCommand.Type], visibility: ArgumentVisibility) -> [Section] {
+    guard !commandStack.isEmpty else { return [] }
+    
     var positionalElements: [Section.Element] = []
     var optionElements: [Section.Element] = []
-    /// Used to keep track of elements already seen from parent commands.
-    var alreadySeenElements = Set<Section.Element>()
 
-    for commandType in commandStack {
-      let args = Array(ArgumentSet(commandType))
+    /// Start with a full slice of the ArgumentSet so we can peel off one or
+    /// more elements at a time.
+    var args = commandStack.argumentsForHelp(visibility: visibility)[...]
+    while let arg = args.popFirst() {
+      assert(arg.help.visibility.isAtLeastAsVisible(as: visibility))
       
-      var i = 0
-      while i < args.count {
-        defer { i += 1 }
-        let arg = args[i]
-        
-        guard arg.help.help?.shouldDisplay != false else { continue }
-        
-        let synopsis: String
-        let description: String
-        
-        if args[i].help.isComposite {
-          // If this argument is composite, we have a group of arguments to
-          // output together.
-          var groupedArgs = [arg]
-          let defaultValue = arg.help.defaultValue.map { "(default: \($0))" } ?? ""
-          while i < args.count - 1 && args[i + 1].help.keys == arg.help.keys {
-            groupedArgs.append(args[i + 1])
-            i += 1
-          }
+      let synopsis: String
+      let description: String
+      
+      if arg.help.isComposite {
+        // If this argument is composite, we have a group of arguments to
+        // output together.
+        let groupEnd = args.firstIndex(where: { $0.help.keys != arg.help.keys }) ?? args.endIndex
+        let groupedArgs = [arg] + args[..<groupEnd]
+        args = args[groupEnd...]
 
-          var synopsisString = ""
-          for arg in groupedArgs {
-            if !synopsisString.isEmpty { synopsisString.append("/") }
-            synopsisString.append("\(arg.synopsisForHelp ?? "")")
-          }
-          synopsis = synopsisString
+        synopsis = groupedArgs
+          .lazy
+          .map { $0.synopsisForHelp }
+          .joined(separator: "/")
 
-          var descriptionString: String?
-          for arg in groupedArgs {
-            if let desc = arg.help.help?.abstract {
-              descriptionString = desc
-              break
-            }
-          }
-          description = [descriptionString, defaultValue]
-            .compactMap { $0 }
-            .joined(separator: " ")
-        } else {
-          let defaultValue = arg.help.defaultValue.flatMap { $0.isEmpty ? nil : "(default: \($0))" } ?? ""
-          synopsis = arg.synopsisForHelp ?? ""
-          description = [arg.help.help?.abstract, defaultValue]
-            .compactMap { $0 }
-            .joined(separator: " ")
-        }
-        
-        let element = Section.Element(label: synopsis, abstract: description, discussion: arg.help.help?.discussion ?? "")
-        if !alreadySeenElements.contains(element) {
-          alreadySeenElements.insert(element)
-          if case .positional = arg.kind {
-            positionalElements.append(element)
-          } else {
-            optionElements.append(element)
-          }
-        }
+        let defaultValue = arg.help.defaultValue
+          .map { "(default: \($0))" } ?? ""
+
+        let descriptionString = groupedArgs
+          .lazy
+          .map { $0.help.abstract }
+          .first { !$0.isEmpty }
+
+        description = [descriptionString, defaultValue]
+          .lazy
+          .compactMap { $0 }
+          .filter { !$0.isEmpty }
+          .joined(separator: " ")
+      } else {
+        synopsis = arg.synopsisForHelp
+
+        let defaultValue = arg.help.defaultValue.flatMap { $0.isEmpty ? nil : "(default: \($0))" }
+        description = [arg.help.abstract, defaultValue]
+          .lazy
+          .compactMap { $0 }
+          .filter { !$0.isEmpty }
+          .joined(separator: " ")
+      }
+      
+      let element = Section.Element(label: synopsis, abstract: description, discussion: arg.help.discussion)
+      if case .positional = arg.kind {
+        positionalElements.append(element)
+      } else {
+        optionElements.append(element)
       }
     }
     
-    if commandStack.contains(where: { !$0.configuration.version.isEmpty }) {
-      optionElements.append(.init(label: "--version", abstract: "Show the version."))
-    }
-
-    let helpLabels = commandStack
-      .first!
-      .getHelpNames()
-      .map { $0.synopsisString }
-      .joined(separator: ", ")
-    if !helpLabels.isEmpty {
-      optionElements.append(.init(label: helpLabels, abstract: "Show help information."))
-    }
-
     let configuration = commandStack.last!.configuration
     let subcommandElements: [Section.Element] =
       configuration.subcommands.compactMap { command in
@@ -238,9 +210,9 @@ internal struct HelpGenerator {
     ]
   }
   
-  func usageMessage(screenWidth: Int? = nil) -> String {
-    let screenWidth = screenWidth ?? HelpGenerator.systemScreenWidth
-    return "Usage: \(usage.rendered(screenWidth: screenWidth))"
+  func usageMessage() -> String {
+    guard !usage.isEmpty else { return "" }
+    return "Usage: \(usage.hangingIndentingEachLine(by: 7))"
   }
   
   var includesSubcommands: Bool {
@@ -259,7 +231,7 @@ internal struct HelpGenerator {
       ? ""
       : "OVERVIEW: \(abstract)".wrapped(to: screenWidth) + "\n\n"
     
-    var helpSubcommandMessage: String = ""
+    var helpSubcommandMessage = ""
     if includesSubcommands {
       var names = commandStack.map { $0._commandName }
       if let superName = commandStack.first!.configuration._superCommandName {
@@ -273,21 +245,108 @@ internal struct HelpGenerator {
         """
     }
     
+    let renderedUsage = usage.isEmpty
+      ? ""
+      : "USAGE: \(usage.hangingIndentingEachLine(by: 7))\n\n"
+    
     return """
     \(renderedAbstract)\
-    USAGE: \(usage.rendered(screenWidth: screenWidth))
-    
+    \(renderedUsage)\
     \(renderedSections)\(helpSubcommandMessage)
     """
   }
 }
 
-internal extension ParsableCommand {
-  static func getHelpNames() -> [Name] {
-    return self.configuration
-      .helpNames
+fileprivate extension CommandConfiguration {
+  static var defaultHelpNames: NameSpecification { [.short, .long] }
+}
+
+fileprivate extension NameSpecification {
+  /// Generates a list of `Name`s for the help command at any visibility level.
+  ///
+  /// If the `default` visibility is used, the help names are returned
+  /// unmodified. If a non-default visibility is used the short names are
+  /// removed and the long names (both single and double dash) are appended with
+  /// the name of the visibility level. After the optional name modification
+  /// step, the name are returned in descending order.
+  func generateHelpNames(visibility: ArgumentVisibility) -> [Name] {
+    self
       .makeNames(InputKey(rawValue: "help"))
+      .compactMap { name in
+        guard visibility.base != .default else { return name }
+        switch name {
+        case .long(let helpName):
+          return .long("\(helpName)-\(visibility.base)")
+        case .longWithSingleDash(let helpName):
+          return .longWithSingleDash("\(helpName)-\(visibility)")
+        case .short:
+          // Cannot create a non-default help flag from a short name.
+          return nil
+        }
+      }
       .sorted(by: >)
+  }
+}
+
+internal extension BidirectionalCollection where Element == ParsableCommand.Type {
+  /// Returns a list of help names at the request visibility level for the top
+  /// most ParsableCommand in the command stack with custom helpNames. If the
+  /// command stack contains no custom help names the default help names.
+  func getHelpNames(visibility: ArgumentVisibility) -> [Name] {
+    self.last(where: { $0.configuration.helpNames != nil })
+      .map { $0.configuration.helpNames!.generateHelpNames(visibility: visibility) }
+      ?? CommandConfiguration.defaultHelpNames.generateHelpNames(visibility: visibility)
+  }
+
+  func getPrimaryHelpName() -> Name? {
+    getHelpNames(visibility: .default).preferredName
+  }
+  
+  func versionArgumentDefinition() -> ArgumentDefinition? {
+    guard contains(where: { !$0.configuration.version.isEmpty })
+      else { return nil }
+    return ArgumentDefinition(
+      kind: .named([.long("version")]),
+      help: .init(help: "Show the version.", key: InputKey(rawValue: "")),
+      completion: .default,
+      update: .nullary({ _, _, _ in })
+    )
+  }
+  
+  func helpArgumentDefinition() -> ArgumentDefinition? {
+    let names = getHelpNames(visibility: .default)
+    guard !names.isEmpty else { return nil }
+    return ArgumentDefinition(
+      kind: .named(names),
+      help: .init(help: "Show help information.", key: InputKey(rawValue: "")),
+      completion: .default,
+      update: .nullary({ _, _, _ in })
+    )
+  }
+  
+  func dumpHelpArgumentDefinition() -> ArgumentDefinition {
+    return ArgumentDefinition(
+      kind: .named([.long("experimental-dump-help")]),
+      help: .init(
+        help: ArgumentHelp("Dump help information as JSON."),
+        key: InputKey(rawValue: "")),
+      completion: .default,
+      update: .nullary({ _, _, _ in })
+    )
+  }
+  
+  /// Returns the ArgumentSet for the last command in this stack, including
+  /// help and version flags, when appropriate.
+  func argumentsForHelp(visibility: ArgumentVisibility) -> ArgumentSet {
+    guard var arguments = self.last.map({ ArgumentSet($0, visibility: visibility) })
+      else { return ArgumentSet() }
+    self.versionArgumentDefinition().map { arguments.append($0) }
+    self.helpArgumentDefinition().map { arguments.append($0) }
+    
+    // To add when 'dump-help' is public API:
+    // arguments.append(self.dumpHelpArgumentDefinition())
+    
+    return arguments
   }
 }
 
@@ -304,15 +363,25 @@ import WinSDK
 #endif
 
 func _terminalSize() -> (width: Int, height: Int) {
-#if os(Windows)
+#if os(WASI)
+  // WASI doesn't yet support terminal size
+  return (80, 25)
+#elseif os(Windows)
   var csbi: CONSOLE_SCREEN_BUFFER_INFO = CONSOLE_SCREEN_BUFFER_INFO()
-
-  GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi)
+  guard GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi) else {
+    return (80, 25)
+  }
   return (width: Int(csbi.srWindow.Right - csbi.srWindow.Left) + 1,
           height: Int(csbi.srWindow.Bottom - csbi.srWindow.Top) + 1)
 #else
   var w = winsize()
+#if os(OpenBSD)
+  // TIOCGWINSZ is a complex macro, so we need the flattened value.
+  let tiocgwinsz = Int32(0x40087468)
+  let err = ioctl(STDOUT_FILENO, tiocgwinsz, &w)
+#else
   let err = ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)
+#endif
   let width = Int(w.ws_col)
   let height = Int(w.ws_row)
   guard err == 0 else { return (80, 25) }

@@ -15,8 +15,8 @@ import ArgumentParserTestHelpers
 
 final class MathExampleTests: XCTestCase {
   func testMath_Simple() throws {
-    AssertExecuteCommand(command: "math 1 2 3 4 5", expected: "15")
-    AssertExecuteCommand(command: "math multiply 1 2 3 4 5", expected: "120")
+    try AssertExecuteCommand(command: "math 1 2 3 4 5", expected: "15")
+    try AssertExecuteCommand(command: "math multiply 1 2 3 4 5", expected: "120")
   }
   
   func testMath_Help() throws {
@@ -37,9 +37,9 @@ final class MathExampleTests: XCTestCase {
           See 'math help <subcommand>' for detailed help.
         """
     
-    AssertExecuteCommand(command: "math -h", expected: helpText)
-    AssertExecuteCommand(command: "math --help", expected: helpText)
-    AssertExecuteCommand(command: "math help", expected: helpText)
+    try AssertExecuteCommand(command: "math -h", expected: helpText)
+    try AssertExecuteCommand(command: "math --help", expected: helpText)
+    try AssertExecuteCommand(command: "math help", expected: helpText)
   }
   
   func testMath_AddHelp() throws {
@@ -57,9 +57,14 @@ final class MathExampleTests: XCTestCase {
           -h, --help              Show help information.
         """
     
-    AssertExecuteCommand(command: "math add -h", expected: helpText)
-    AssertExecuteCommand(command: "math add --help", expected: helpText)
-    AssertExecuteCommand(command: "math help add", expected: helpText)
+    try AssertExecuteCommand(command: "math add -h", expected: helpText)
+    try AssertExecuteCommand(command: "math add --help", expected: helpText)
+    try AssertExecuteCommand(command: "math help add", expected: helpText)
+    
+    // Verify that extra help flags are ignored.
+    try AssertExecuteCommand(command: "math help add -h", expected: helpText)
+    try AssertExecuteCommand(command: "math help add -help", expected: helpText)
+    try AssertExecuteCommand(command: "math help add --help", expected: helpText)
   }
   
   func testMath_StatsMeanHelp() throws {
@@ -77,36 +82,42 @@ final class MathExampleTests: XCTestCase {
           -h, --help              Show help information.
         """
     
-    AssertExecuteCommand(command: "math stats average -h", expected: helpText)
-    AssertExecuteCommand(command: "math stats average --help", expected: helpText)
-    AssertExecuteCommand(command: "math help stats average", expected: helpText)
+    try AssertExecuteCommand(command: "math stats average -h", expected: helpText)
+    try AssertExecuteCommand(command: "math stats average --help", expected: helpText)
+    try AssertExecuteCommand(command: "math help stats average", expected: helpText)
   }
   
   func testMath_StatsQuantilesHelp() throws {
     let helpText = """
         OVERVIEW: Print the quantiles of the values (TBD).
 
-        USAGE: math stats quantiles [<values> ...]
+        USAGE: math stats quantiles [<one-of-four>] [<custom-arg>] [<values> ...] [--file <file>] [--directory <directory>] [--shell <shell>] [--custom <custom>]
 
         ARGUMENTS:
+          <one-of-four>
+          <custom-arg>
           <values>                A group of floating-point values to operate on.
 
         OPTIONS:
+          --file <file>
+          --directory <directory>
+          --shell <shell>
+          --custom <custom>
           --version               Show the version.
           -h, --help              Show help information.
         """
     
     // The "quantiles" subcommand's run() method is unimplemented, so it
     // just generates the help text.
-    AssertExecuteCommand(command: "math stats quantiles", expected: helpText)
+    try AssertExecuteCommand(command: "math stats quantiles", expected: helpText)
     
-    AssertExecuteCommand(command: "math stats quantiles -h", expected: helpText)
-    AssertExecuteCommand(command: "math stats quantiles --help", expected: helpText)
-    AssertExecuteCommand(command: "math help stats quantiles", expected: helpText)
+    try AssertExecuteCommand(command: "math stats quantiles -h", expected: helpText)
+    try AssertExecuteCommand(command: "math stats quantiles --help", expected: helpText)
+    try AssertExecuteCommand(command: "math help stats quantiles", expected: helpText)
   }
   
   func testMath_CustomValidation() throws {
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats average --kind mode",
       expected: """
             Error: Please provide at least one value to calculate the mode.
@@ -117,38 +128,38 @@ final class MathExampleTests: XCTestCase {
   }
   
   func testMath_Versions() throws {
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --version",
       expected: "1.0.0")
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats --version",
       expected: "1.0.0")
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats average --version",
       expected: "1.5.0-alpha")
   }
 
   func testMath_ExitCodes() throws {
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats quantiles --test-success-exit-code",
       expected: "",
       exitCode: .success)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats quantiles --test-failure-exit-code",
       expected: "",
       exitCode: .failure)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats quantiles --test-validation-exit-code",
       expected: "",
       exitCode: .validationFailure)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math stats quantiles --test-custom-exit-code 42",
       expected: "",
       exitCode: ExitCode(42))
   }
   
   func testMath_Fail() throws {
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --foo",
       expected: """
             Error: Unknown option '--foo'
@@ -157,10 +168,11 @@ final class MathExampleTests: XCTestCase {
             """,
       exitCode: .validationFailure)
     
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math ZZZ",
       expected: """
             Error: The value 'ZZZ' is invalid for '<values>'
+            Help:  <values>  A group of integers to operate on.
             Usage: math add [--hex-output] [<values> ...]
               See 'math add --help' for more information.
             """,
@@ -171,29 +183,29 @@ final class MathExampleTests: XCTestCase {
 // MARK: - Completion Script
 
 extension MathExampleTests {
-  func testMath_CompletionScript() {
-    AssertExecuteCommand(
+  func testMath_CompletionScript() throws {
+    try AssertExecuteCommand(
       command: "math --generate-completion-script=bash",
       expected: bashCompletionScriptText)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --generate-completion-script bash",
       expected: bashCompletionScriptText)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --generate-completion-script=zsh",
       expected: zshCompletionScriptText)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --generate-completion-script zsh",
       expected: zshCompletionScriptText)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --generate-completion-script=fish",
       expected: fishCompletionScriptText)
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math --generate-completion-script fish",
       expected: fishCompletionScriptText)
   }
   
-  func testMath_CustomCompletion() {
-    AssertExecuteCommand(
+  func testMath_CustomCompletion() throws {
+    try AssertExecuteCommand(
       command: "math ---completion stats quantiles -- --custom",
       expected: """
         hello
@@ -201,7 +213,7 @@ extension MathExampleTests {
         heliotrope
         """)
     
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math ---completion stats quantiles -- --custom h",
       expected: """
         hello
@@ -209,7 +221,7 @@ extension MathExampleTests {
         heliotrope
         """)
   
-    AssertExecuteCommand(
+    try AssertExecuteCommand(
       command: "math ---completion stats quantiles -- --custom a",
       expected: """
         aardvark
@@ -225,7 +237,7 @@ _math() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     COMPREPLY=()
-    opts="add multiply stats help -h --help"
+    opts="--version -h --help add multiply stats help"
     if [[ $COMP_CWORD == "1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -251,7 +263,7 @@ _math() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_add() {
-    opts="--hex-output -x -h --help"
+    opts="--hex-output -x --version -h --help"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -259,7 +271,7 @@ _math_add() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_multiply() {
-    opts="--hex-output -x -h --help"
+    opts="--hex-output -x --version -h --help"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -267,7 +279,7 @@ _math_multiply() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_stats() {
-    opts="average stdev quantiles -h --help"
+    opts="--version -h --help average stdev quantiles"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -289,7 +301,7 @@ _math_stats() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_stats_average() {
-    opts="--kind -h --help"
+    opts="--kind --version -h --help"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -303,7 +315,7 @@ _math_stats_average() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_stats_stdev() {
-    opts="-h --help"
+    opts="--version -h --help"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -311,18 +323,14 @@ _math_stats_stdev() {
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_stats_quantiles() {
-    opts="--test-success-exit-code --test-failure-exit-code --test-validation-exit-code --test-custom-exit-code --file --directory --shell --custom -h --help"
+    opts="--file --directory --shell --custom --version -h --help"
     opts="$opts alphabet alligator branch braggart"
-    opts="$opts $(math ---completion stats quantiles -- customArg "$COMP_WORDS")"
+    opts="$opts $("${COMP_WORDS[0]}" ---completion stats quantiles -- customArg "${COMP_WORDS[@]}")"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
     fi
     case $prev in
-        --test-custom-exit-code)
-            
-            return
-        ;;
         --file)
             COMPREPLY=( $(compgen -f -- "$cur") )
             return
@@ -336,14 +344,14 @@ _math_stats_quantiles() {
             return
         ;;
         --custom)
-            COMPREPLY=( $(compgen -W "$(math ---completion stats quantiles -- --custom "$COMP_WORDS")" -- "$cur") )
+            COMPREPLY=( $(compgen -W "$("${COMP_WORDS[0]}" ---completion stats quantiles -- --custom "${COMP_WORDS[@]}")" -- "$cur") )
             return
         ;;
     esac
     COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
 }
 _math_help() {
-    opts="-h --help"
+    opts="--version"
     if [[ $COMP_CWORD == "$1" ]]; then
         COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
         return
@@ -365,7 +373,8 @@ _math() {
     integer ret=1
     local -a args
     args+=(
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
         '(-): :->command'
         '(-)*:: :->arg'
     )
@@ -408,7 +417,8 @@ _math_add() {
     args+=(
         '(--hex-output -x)'{--hex-output,-x}'[Use hexadecimal notation for the result.]'
         ':values:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -421,7 +431,8 @@ _math_multiply() {
     args+=(
         '(--hex-output -x)'{--hex-output,-x}'[Use hexadecimal notation for the result.]'
         ':values:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -432,7 +443,8 @@ _math_stats() {
     integer ret=1
     local -a args
     args+=(
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
         '(-): :->command'
         '(-)*:: :->arg'
     )
@@ -471,7 +483,8 @@ _math_stats_average() {
     args+=(
         '--kind[The kind of average to provide.]:kind:(mean median mode)'
         ':values:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -483,7 +496,8 @@ _math_stats_stdev() {
     local -a args
     args+=(
         ':values:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -497,15 +511,12 @@ _math_stats_quantiles() {
         ':one-of-four:(alphabet alligator branch braggart)'
         ':custom-arg:{_custom_completion $_math_commandname ---completion stats quantiles -- customArg $words}'
         ':values:'
-        '--test-success-exit-code'
-        '--test-failure-exit-code'
-        '--test-validation-exit-code'
-        '--test-custom-exit-code:test-custom-exit-code:'
         '--file:file:_files -g '"'"'*.txt *.md'"'"''
         '--directory:directory:_files -/'
         '--shell:shell:{local -a list; list=(${(f)"$(head -100 /usr/share/dict/words | tail -50)"}); _describe '''' list}'
         '--custom:custom:{_custom_completion $_math_commandname ---completion stats quantiles -- --custom $words}'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -517,7 +528,7 @@ _math_help() {
     local -a args
     args+=(
         ':subcommands:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '--version[Show the version.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -534,8 +545,8 @@ _math
 """
 
 private let fishCompletionScriptText = """
-function __fish_math_using_command
-    set cmd (commandline -opc)
+function _swift_math_using_command
+    set -l cmd (commandline -opc)
     if [ (count $cmd) -eq (count $argv) ]
         for i in (seq (count $argv))
             if [ $cmd[$i] != $argv[$i] ]
@@ -546,28 +557,33 @@ function __fish_math_using_command
     end
     return 1
 end
-complete -c math -n '__fish_math_using_command math' -f -a 'add' -d 'Print the sum of the values.'
-complete -c math -n '__fish_math_using_command math' -f -a 'multiply' -d 'Print the product of the values.'
-complete -c math -n '__fish_math_using_command math' -f -a 'stats' -d 'Calculate descriptive statistics.'
-complete -c math -n '__fish_math_using_command math' -f -a 'help' -d 'Show subcommand help information.'
-complete -c math -n '__fish_math_using_command math add' -f -l hex-output -s x -d 'Use hexadecimal notation for the result.'
-complete -c math -n '__fish_math_using_command math multiply' -f -l hex-output -s x -d 'Use hexadecimal notation for the result.'
-complete -c math -n '__fish_math_using_command math stats' -f -a 'average' -d 'Print the average of the values.'
-complete -c math -n '__fish_math_using_command math stats' -f -a 'stdev' -d 'Print the standard deviation of the values.'
-complete -c math -n '__fish_math_using_command math stats' -f -a 'quantiles' -d 'Print the quantiles of the values (TBD).'
-complete -c math -n '__fish_math_using_command math stats' -f -a 'help' -d 'Show subcommand help information.'
-complete -c math -n '__fish_math_using_command math stats average' -f -r -l kind -d 'The kind of average to provide.'
-complete -c math -n '__fish_math_using_command math stats average --kind' -f -k -a 'mean median mode'
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -l test-success-exit-code
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -l test-failure-exit-code
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -l test-validation-exit-code
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -r -l test-custom-exit-code
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -r -l file
-complete -c math -n '__fish_math_using_command math stats quantiles --file' -f -a '(for i in *.{txt,md}; echo $i;end)'
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -r -l directory
-complete -c math -n '__fish_math_using_command math stats quantiles --directory' -f -a '(__fish_complete_directories)'
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -r -l shell
-complete -c math -n '__fish_math_using_command math stats quantiles --shell' -f -a '(head -100 /usr/share/dict/words | tail -50)'
-complete -c math -n '__fish_math_using_command math stats quantiles' -f -r -l custom
-complete -c math -n '__fish_math_using_command math stats quantiles --custom' -f -a '(command math ---completion stats quantiles -- --custom (commandline -opc)[1..-1])'
+complete -c math -n '_swift_math_using_command math' -f -l version -d 'Show the version.'
+complete -c math -n '_swift_math_using_command math' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math' -f -a 'add' -d 'Print the sum of the values.'
+complete -c math -n '_swift_math_using_command math' -f -a 'multiply' -d 'Print the product of the values.'
+complete -c math -n '_swift_math_using_command math' -f -a 'stats' -d 'Calculate descriptive statistics.'
+complete -c math -n '_swift_math_using_command math' -f -a 'help' -d 'Show subcommand help information.'
+complete -c math -n '_swift_math_using_command math add' -f -l hex-output -s x -d 'Use hexadecimal notation for the result.'
+complete -c math -n '_swift_math_using_command math add' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math multiply' -f -l hex-output -s x -d 'Use hexadecimal notation for the result.'
+complete -c math -n '_swift_math_using_command math multiply' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math stats' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math stats' -f -a 'average' -d 'Print the average of the values.'
+complete -c math -n '_swift_math_using_command math stats' -f -a 'stdev' -d 'Print the standard deviation of the values.'
+complete -c math -n '_swift_math_using_command math stats' -f -a 'quantiles' -d 'Print the quantiles of the values (TBD).'
+complete -c math -n '_swift_math_using_command math stats' -f -a 'help' -d 'Show subcommand help information.'
+complete -c math -n '_swift_math_using_command math stats average' -f -r -l kind -d 'The kind of average to provide.'
+complete -c math -n '_swift_math_using_command math stats average --kind' -f -k -a 'mean median mode'
+complete -c math -n '_swift_math_using_command math stats average' -f -l version -d 'Show the version.'
+complete -c math -n '_swift_math_using_command math stats average' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math stats stdev' -f -s h -l help -d 'Show help information.'
+complete -c math -n '_swift_math_using_command math stats quantiles' -f -r -l file
+complete -c math -n '_swift_math_using_command math stats quantiles --file' -f -a '(for i in *.{txt,md}; echo $i;end)'
+complete -c math -n '_swift_math_using_command math stats quantiles' -f -r -l directory
+complete -c math -n '_swift_math_using_command math stats quantiles --directory' -f -a '(__fish_complete_directories)'
+complete -c math -n '_swift_math_using_command math stats quantiles' -f -r -l shell
+complete -c math -n '_swift_math_using_command math stats quantiles --shell' -f -a '(head -100 /usr/share/dict/words | tail -50)'
+complete -c math -n '_swift_math_using_command math stats quantiles' -f -r -l custom
+complete -c math -n '_swift_math_using_command math stats quantiles --custom' -f -a '(command math ---completion stats quantiles -- --custom (commandline -opc)[1..-1])'
+complete -c math -n '_swift_math_using_command math stats quantiles' -f -s h -l help -d 'Show help information.'
 """

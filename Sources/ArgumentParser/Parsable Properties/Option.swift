@@ -9,23 +9,43 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// A wrapper that represents a command-line option.
+/// A property wrapper that represents a command-line option.
 ///
-/// An option is a value that can be specified as a named value on the command
-/// line. An option can have a default values specified as part of its
+/// Use the `@Option` wrapper to define a property of your custom command as a
+/// command-line option. An *option* is a named value passed to a command-line
+/// tool, like `--configuration debug`. Options can be specified in any order.
+///
+/// An option can have a default value specified as part of its
 /// declaration; options with optional `Value` types implicitly have `nil` as
-/// their default value.
+/// their default value. Options that are neither declared as `Optional` nor
+/// given a default value are required for users of your command-line tool.
 ///
-///     struct Options: ParsableArguments {
-///         @Option(default: "Hello") var greeting: String
-///         @Option var name: String
+/// For example, the following program defines three options:
+///
+///     @main
+///     struct Greet: ParsableCommand {
+///         @Option var greeting = "Hello"
 ///         @Option var age: Int?
+///         @Option var name: String
+///
+///         mutating func run() {
+///             print("\(greeting) \(name)!")
+///             if let age = age {
+///                 print("Congrats on making it to the ripe old age of \(age)!")
+///             }
+///         }
 ///     }
 ///
 /// `greeting` has a default value of `"Hello"`, which can be overridden by
-/// providing a different string as an argument. `age` defaults to `nil`, while
-/// `name` is a required argument because it is non-`nil` and has no default
+/// providing a different string as an argument, while `age` defaults to `nil`.
+/// `name` is a required option because it is non-`nil` and has no default
 /// value.
+///
+///     $ greet --name Alicia
+///     Hello Alicia!
+///     $ greet --age 28 --name Seungchin --greeting Hi
+///     Hi Seungchin!
+///     Congrats on making it to the ripe old age of 28!
 @propertyWrapper
 public struct Option<Value>: Decodable, ParsedWrapper {
   internal var _parsedValue: Parsed<Value>
@@ -98,7 +118,7 @@ extension Option where Value: ExpressibleByArgument {
       ArgumentSet(
         key: key,
         kind: .name(key: key, specification: name),
-        parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy),
+        parsingStrategy: parsingStrategy.base,
         parseType: Value.self,
         name: name,
         default: initial, help: help, completion: completion ?? Value.defaultCompletionKind)
@@ -106,39 +126,21 @@ extension Option where Value: ExpressibleByArgument {
     )
   }
 
-  /// Creates a property that reads its value from a labeled option.
-  ///
-  /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:name:parsing:help:)` for properties with a default value
-  /// - `init(name:parsing:help:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Option(default: "bar")
-  /// -var foo: String
-  /// +@Option var foo: String = "bar"
-  /// ```
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, this option and value are required from the user.
-  ///   - parsingStrategy: The behavior to use when looking for this option's
-  ///     value.
-  ///   - help: Information about how to use this option.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: String = \"bar\"`)")
+  /// Creates a property with a default value provided by standard Swift default value syntax.
+  @available(*, deprecated, message: "Swap the order of your 'help' and 'completion' arguments.")
   public init(
+    wrappedValue: Value,
     name: NameSpecification = .long,
-    default initial: Value?,
     parsing parsingStrategy: SingleValueParsingStrategy = .next,
-    help: ArgumentHelp? = nil
+    completion: CompletionKind?,
+    help: ArgumentHelp?
   ) {
     self.init(
       name: name,
-      initial: initial,
+      initial: wrappedValue,
       parsingStrategy: parsingStrategy,
       help: help,
-      completion: nil)
+      completion: completion)
   }
 
   /// Creates a property with a default value provided by standard Swift default value syntax.
@@ -149,16 +151,17 @@ extension Option where Value: ExpressibleByArgument {
   /// ```
   ///
   /// - Parameters:
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when looking for this option's value.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   public init(
     wrappedValue: Value,
     name: NameSpecification = .long,
     parsing parsingStrategy: SingleValueParsingStrategy = .next,
-    completion: CompletionKind? = nil,
-    help: ArgumentHelp? = nil
+    help: ArgumentHelp? = nil,
+    completion: CompletionKind? = nil
   ) {
     self.init(
       name: name,
@@ -179,6 +182,7 @@ extension Option where Value: ExpressibleByArgument {
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when looking for this option's value.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   public init(
     name: NameSpecification = .long,
     parsing parsingStrategy: SingleValueParsingStrategy = .next,
@@ -196,8 +200,10 @@ extension Option where Value: ExpressibleByArgument {
 
 /// The strategy to use when parsing a single value from `@Option` arguments.
 ///
-/// - SeeAlso: `ArrayParsingStrategy``
-public enum SingleValueParsingStrategy {
+/// - SeeAlso: ``ArrayParsingStrategy``
+public struct SingleValueParsingStrategy: Hashable {  
+  internal var base: ArgumentDefinition.ParsingStrategy
+  
   /// Parse the input after the option. Expect it to be a value.
   ///
   /// For inputs such as `--foo foo`, this would parse `foo` as the
@@ -209,7 +215,9 @@ public enum SingleValueParsingStrategy {
   ///     Usage: command [--foo <foo>]
   ///
   /// This is the **default behavior** for `@Option`-wrapped properties.
-  case next
+  public static var next: SingleValueParsingStrategy {
+    self.init(base: .default)
+  }
   
   /// Parse the next input, even if it could be interpreted as an option or
   /// flag.
@@ -223,7 +231,9 @@ public enum SingleValueParsingStrategy {
   /// interpreted as the start of another option.
   ///
   /// - Note: This is usually *not* what users would expect. Use with caution.
-  case unconditional
+  public static var unconditional: SingleValueParsingStrategy {
+    self.init(base: .unconditional)
+  }
   
   /// Parse the next input, as long as that input can't be interpreted as
   /// an option or flag.
@@ -234,12 +244,16 @@ public enum SingleValueParsingStrategy {
   ///
   /// For example, if `--foo` takes a value, then the input `--foo --bar bar`
   /// would be parsed such that the value `bar` is used for `--foo`.
-  case scanningForValue
+  public static var scanningForValue: SingleValueParsingStrategy {
+    self.init(base: .scanningForValue)
+  }
 }
 
 /// The strategy to use when parsing multiple values from `@Option` arguments into an
 /// array.
-public enum ArrayParsingStrategy {
+public struct ArrayParsingStrategy: Hashable {
+  internal var base: ArgumentDefinition.ParsingStrategy
+  
   /// Parse one value per option, joining multiple into an array.
   ///
   /// For example, for a parsable type with a property defined as
@@ -252,7 +266,9 @@ public enum ArrayParsingStrategy {
   ///     such, the value for this option will be the next value (non-option) in the input. For the
   ///     above example, the input `--read --name Foo Bar` would parse `Foo` into
   ///     `read` (and `Bar` into `name`).
-  case singleValue
+  public static var singleValue: ArrayParsingStrategy {
+    self.init(base: .default)
+  }
   
   /// Parse the value immediately after the option while allowing repeating options, joining multiple into an array.
   ///
@@ -267,7 +283,9 @@ public enum ArrayParsingStrategy {
   /// - Note: However, the input `--read --name Foo Bar --read baz` would result in
   /// `read` being set to the array `["--name", "baz"]`. This is usually *not* what users
   /// would expect. Use with caution.
-  case unconditionalSingleValue
+  public static var unconditionalSingleValue: ArrayParsingStrategy {
+    self.init(base: .unconditional)
+  }
   
   /// Parse all values up to the next option.
   ///
@@ -279,8 +297,10 @@ public enum ArrayParsingStrategy {
   /// Parsing stops as soon as there’s another option in the input such that
   /// `--files foo bar --verbose` would also set `files` to the array
   /// `["foo", "bar"]`.
-  case upToNextOption
-  
+  public static var upToNextOption: ArrayParsingStrategy {
+    self.init(base: .upToNextOption)
+  }
+
   /// Parse all remaining arguments into an array.
   ///
   /// `.remaining` can be used for capturing pass-through flags. For example, for
@@ -304,7 +324,9 @@ public enum ArrayParsingStrategy {
   /// ```
   /// would parse the input `--name Foo -- Bar --baz` such that the `remainder`
   /// would hold the value `["Bar", "--baz"]`.
-  case remaining
+  public static var remaining: ArrayParsingStrategy {
+    self.init(base: .allRemainingInput)
+  }
 }
 
 extension Option {
@@ -319,6 +341,7 @@ extension Option {
   ///   - parsingStrategy: The behavior to use when looking for this option's
   ///     value.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   public init<T: ExpressibleByArgument>(
     name: NameSpecification = .long,
     parsing parsingStrategy: SingleValueParsingStrategy = .next,
@@ -329,35 +352,11 @@ extension Option {
       var arg = ArgumentDefinition(
         key: key,
         kind: .name(key: key, specification: name),
-        parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy),
+        parsingStrategy: parsingStrategy.base,
         parser: T.init(argument:),
         default: nil,
         completion: completion ?? T.defaultCompletionKind)
-      arg.help.help = help
-      return ArgumentSet(arg.optional)
-    })
-  }
-
-  @available(*, deprecated, message: """
-    Default values don't make sense for optional properties.
-    Remove the 'default' parameter if its value is nil,
-    or make your property non-optional if it's non-nil.
-    """)
-  public init<T: ExpressibleByArgument>(
-    name: NameSpecification = .long,
-    default initial: T?,
-    parsing parsingStrategy: SingleValueParsingStrategy = .next,
-    help: ArgumentHelp? = nil
-  ) where Value == T? {
-    self.init(_parsedValue: .init { key in
-      var arg = ArgumentDefinition(
-        key: key,
-        kind: .name(key: key, specification: name),
-        parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy),
-        parser: T.init(argument:),
-        default: initial,
-        completion: T.defaultCompletionKind)
-      arg.help.help = help
+      arg.help.updateArgumentHelp(help: help)
       return ArgumentSet(arg.optional)
     })
   }
@@ -376,7 +375,7 @@ extension Option {
     self.init(_parsedValue: .init { key in
       let kind = ArgumentDefinition.Kind.name(key: key, specification: name)
       let help = ArgumentDefinition.Help(options: initial != nil ? .isOptional : [], help: help, key: key)
-      var arg = ArgumentDefinition(kind: kind, help: help, completion: completion ?? .default, parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy), update: .unary({
+      var arg = ArgumentDefinition(kind: kind, help: help, completion: completion ?? .default, parsingStrategy: parsingStrategy.base, update: .unary({
         (origin, name, valueString, parsedValues) in
         do {
           let transformedValue = try transform(valueString)
@@ -395,48 +394,6 @@ extension Option {
       })
   }
 
-  /// Creates a property that reads its value from a labeled option, parsing
-  /// with the given closure.
-  ///
-  /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:name:parsing:help:transform:)` for properties with a default value
-  /// - `init(name:parsing:help:transform:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Option(default: "bar", transform: baz)
-  /// -var foo: String
-  /// +@Option(transform: baz)
-  /// +var foo: String = "bar"
-  /// ```
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, this option and value are required from the user.
-  ///   - parsingStrategy: The behavior to use when looking for this option's
-  ///     value.
-  ///   - help: Information about how to use this option.
-  ///   - transform: A closure that converts a string into this property's
-  ///     type or throws an error.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: String = \"bar\"`)")
-  public init(
-    name: NameSpecification = .long,
-    default initial: Value?,
-    parsing parsingStrategy: SingleValueParsingStrategy = .next,
-    help: ArgumentHelp? = nil,
-    transform: @escaping (String) throws -> Value
-  ) {
-     self.init(
-      name: name,
-      initial: initial,
-      parsingStrategy: parsingStrategy,
-      help: help,
-      completion: nil,
-      transform: transform
-    )
-  }
-
   /// Creates a property with a default value provided by standard Swift default value syntax, parsing with the given closure.
   ///
   /// This method is called to initialize an `Option` with a default value such as:
@@ -449,6 +406,7 @@ extension Option {
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when looking for this option's value.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   ///   - transform: A closure that converts a string into this property's type or throws an error.
   public init(
     wrappedValue: Value,
@@ -480,6 +438,7 @@ extension Option {
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when looking for this option's value.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   ///   - transform: A closure that converts a string into this property's type or throws an error.
   public init(
     name: NameSpecification = .long,
@@ -529,7 +488,7 @@ extension Option {
         kind: kind,
         help: help,
         completion: completion ?? Element.defaultCompletionKind,
-        parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy),
+        parsingStrategy: parsingStrategy.base,
         update: .appendToArray(forType: Element.self, key: key),
         initial: setInitialValue
       )
@@ -547,6 +506,7 @@ extension Option {
   ///   - parsingStrategy: The behavior to use when parsing multiple values
   ///     from the command-line arguments.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   public init<Element>(
     wrappedValue: [Element],
     name: NameSpecification = .long,
@@ -575,6 +535,7 @@ extension Option {
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when parsing multiple values from the command-line arguments.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   public init<Element>(
     name: NameSpecification = .long,
     parsing parsingStrategy: ArrayParsingStrategy = .singleValue,
@@ -622,7 +583,7 @@ extension Option {
         kind: kind,
         help: help,
         completion: completion ?? .default,
-        parsingStrategy: ArgumentDefinition.ParsingStrategy(parsingStrategy),
+        parsingStrategy: parsingStrategy.base,
         update: .unary({ (origin, name, valueString, parsedValues) in
           do {
             let transformedElement = try transform(valueString)
@@ -653,6 +614,7 @@ extension Option {
   ///   - parsingStrategy: The behavior to use when parsing multiple values
   ///     from the command-line arguments.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   ///   - transform: A closure that converts a string into this property's
   ///     element type or throws an error.
   public init<Element>(
@@ -685,6 +647,7 @@ extension Option {
   ///   - name: A specification for what names are allowed for this flag.
   ///   - parsingStrategy: The behavior to use when parsing multiple values from the command-line arguments.
   ///   - help: Information about how to use this option.
+  ///   - completion: Kind of completion provided to the user for this option.
   ///   - transform: A closure that converts a string into this property's element type or throws an error.
   public init<Element>(
     name: NameSpecification = .long,

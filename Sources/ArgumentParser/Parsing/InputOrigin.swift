@@ -11,13 +11,51 @@
 
 /// Specifies where a given input came from.
 ///
-/// When reading from the command line, a value might originate from multiple indices.
+/// When reading from the command line, a value might originate from a single
+/// index, multiple indices, or from part of an index. For this command:
 ///
-/// This is usually an index into the `SplitArguments`.
-/// In some cases it can be multiple indices.
+///     struct Example: ParsableCommand {
+///         @Flag(name: .short) var verbose = false
+///         @Flag(name: .short) var expert = false
+///
+///         @Option var count: Int
+///     }
+///
+/// ...with this usage:
+///
+///     $ example -ve --count 5
+///
+/// The parsed value for the `count` property will come from indices `1` and
+/// `2`, while the value for `verbose` will come from index `1`, sub-index `0`.
 struct InputOrigin: Equatable, ExpressibleByArrayLiteral {
   enum Element: Comparable, Hashable {
+    /// The input value came from a property's default value, not from a
+    /// command line argument.
+    case defaultValue
+    
+    /// The input value came from the specified index in the argument string.
     case argumentIndex(SplitArguments.Index)
+    
+    var baseIndex: Int? {
+      switch self {
+      case .defaultValue:
+        return nil
+      case .argumentIndex(let i):
+        return i.inputIndex.rawValue
+      }
+    }
+    
+    var subIndex: Int? {
+      switch self {
+      case .defaultValue:
+        return nil
+      case .argumentIndex(let i):
+        switch i.subIndex {
+        case .complete: return nil
+        case .sub(let n): return n
+        }
+      }
+    }
   }
   
   private var _elements: Set<Element> = []
@@ -65,11 +103,21 @@ struct InputOrigin: Equatable, ExpressibleByArrayLiteral {
   }
 }
 
+extension InputOrigin {
+  var isDefaultValue: Bool {
+    return _elements.count == 1 && _elements.first == .defaultValue
+  }
+}
+
 extension InputOrigin.Element {
   static func < (lhs: Self, rhs: Self) -> Bool {
     switch (lhs, rhs) {
     case (.argumentIndex(let l), .argumentIndex(let r)):
       return l < r
+    case (.argumentIndex, .defaultValue):
+      return true
+    case (.defaultValue, _):
+      return false
     }
   }
 }

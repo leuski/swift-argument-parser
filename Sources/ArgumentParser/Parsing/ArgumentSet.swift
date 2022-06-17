@@ -25,7 +25,7 @@ struct ArgumentSet {
   init<S: Sequence>(_ arguments: S) where S.Element == ArgumentDefinition {
     self.content = Array(arguments)
     self.namePositions = Dictionary(
-      content.enumerated().flatMap { i, arg in arg.names.map { ($0, i) } },
+      content.enumerated().flatMap { i, arg in arg.names.map { ($0.nameToMatch, i) } },
       uniquingKeysWith: { first, _ in first })
   }
   
@@ -38,6 +38,14 @@ struct ArgumentSet {
   init(sets: [ArgumentSet]) {
     self.init(sets.joined())
   }
+  
+  mutating func append(_ arg: ArgumentDefinition) {
+    let newPosition = content.count
+    content.append(arg)
+    for name in arg.names where namePositions[name.nameToMatch] == nil {
+      namePositions[name.nameToMatch] = newPosition
+    }
+  }
 }
 
 extension ArgumentSet: CustomDebugStringConvertible {
@@ -48,9 +56,11 @@ extension ArgumentSet: CustomDebugStringConvertible {
   }
 }
 
-extension ArgumentSet: Sequence {
-  func makeIterator() -> Array<ArgumentDefinition>.Iterator {
-    return content.makeIterator()
+extension ArgumentSet: RandomAccessCollection {
+  var startIndex: Int { content.startIndex }
+  var endIndex: Int { content.endIndex }
+  subscript(position: Int) -> ArgumentDefinition {
+    content[position]
   }
 }
 
@@ -75,7 +85,7 @@ extension ArgumentSet {
   }
 
   static func updateFlag<Value: Equatable>(key: InputKey, value: Value, origin: InputOrigin, values: inout ParsedValues, hasUpdated: Bool, exclusivity: FlagExclusivity) throws -> Bool {
-    switch (hasUpdated, exclusivity) {
+    switch (hasUpdated, exclusivity.base) {
     case (true, .exclusive):
       // This value has already been set.
       if let previous = values.element(forKey: key) {
@@ -96,22 +106,31 @@ extension ArgumentSet {
   }
   
   /// Creates an argument set for a pair of inverted Boolean flags.
-  static func flag(key: InputKey, name: NameSpecification, default initialValue: Bool?, inversion: FlagInversion, exclusivity: FlagExclusivity, help: ArgumentHelp?) -> ArgumentSet {
-    // The flag is required if initialValue is `nil`, otherwise it's optional
-    let helpOptions: ArgumentDefinition.Help.Options = initialValue != nil ? .isOptional : []
+  static func flag(
+    key: InputKey,
+    name: NameSpecification,
+    default initialValue: Bool?,
+    required: Bool,
+    inversion: FlagInversion,
+    exclusivity: FlagExclusivity,
+    help: ArgumentHelp?) -> ArgumentSet
+  {
+    let helpOptions: ArgumentDefinition.Help.Options = required ? [] : .isOptional
     
-    let help = ArgumentDefinition.Help(options: helpOptions, help: help, defaultValue: initialValue.map(String.init), key: key, isComposite: true)
+    let enableHelp = ArgumentDefinition.Help(options: helpOptions, help: help, defaultValue: initialValue.map(String.init), key: key, isComposite: true)
+    let disableHelp = ArgumentDefinition.Help(options: [.isOptional], help: help, key: key)
+
     let (enableNames, disableNames) = inversion.enableDisableNamePair(for: key, name: name)
 
     var hasUpdated = false
-    let enableArg = ArgumentDefinition(kind: .named(enableNames),help: help, completion: .default, update: .nullary({ (origin, name, values) in
+    let enableArg = ArgumentDefinition(kind: .named(enableNames), help: enableHelp, completion: .default, update: .nullary({ (origin, name, values) in
         hasUpdated = try ArgumentSet.updateFlag(key: key, value: true, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
     }), initial: { origin, values in
       if let initialValue = initialValue {
         values.set(initialValue, forKey: key, inputOrigin: origin)
       }
     })
-    let disableArg = ArgumentDefinition(kind: .named(disableNames), help: ArgumentDefinition.Help(options: [.isOptional], key: key), completion: .default, update: .nullary({ (origin, name, values) in
+    let disableArg = ArgumentDefinition(kind: .named(disableNames), help: disableHelp, completion: .default, update: .nullary({ (origin, name, values) in
         hasUpdated = try ArgumentSet.updateFlag(key: key, value: false, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
     }), initial: { _, _ in })
     return ArgumentSet([enableArg, disableArg])
@@ -136,9 +155,9 @@ extension ArgumentSet {
 
 extension ArgumentSet {
   /// Create a unary / argument that parses the string as `A`.
-  init<A: ExpressibleByArgument>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ArgumentDefinition.ParsingStrategy = .nextAsValue, parseType type: A.Type, name: NameSpecification, default initial: A?, help: ArgumentHelp?, completion: CompletionKind) {
+  init<A: ExpressibleByArgument>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ArgumentDefinition.ParsingStrategy = .default, parseType type: A.Type, name: NameSpecification, default initial: A?, help: ArgumentHelp?, completion: CompletionKind) {
     var arg = ArgumentDefinition(key: key, kind: kind, parsingStrategy: parsingStrategy, parser: A.init(argument:), default: initial, completion: completion)
-    arg.help.help = help
+    arg.help.updateArgumentHelp(help: help)
     arg.help.defaultValue = initial.map { "\($0.defaultValueDescription)" }
     self.init(arg)
   }
@@ -146,46 +165,75 @@ extension ArgumentSet {
 
 extension ArgumentDefinition {
   /// Create a unary / argument that parses using the given closure.
-  init<A>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ParsingStrategy = .nextAsValue, parser: @escaping (String) -> A?, parseType type: A.Type = A.self, default initial: A?, completion: CompletionKind) {
-    let initialValueCreator: (InputOrigin, inout ParsedValues) throws -> Void
-    if let initialValue = initial {
-      initialValueCreator = { origin, values in
-        values.set(initialValue, forKey: key, inputOrigin: origin)
-      }
-    } else {
-      initialValueCreator = { _, _ in }
-    }
-    
-    self.init(kind: kind, help: ArgumentDefinition.Help(key: key), completion: completion, parsingStrategy: parsingStrategy, update: .unary({ (origin, name, value, values) in
+  init<A>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ParsingStrategy = .default, parser: @escaping (String) -> A?, parseType type: A.Type = A.self, default initial: A?, completion: CompletionKind) {
+    self.init(key: key, kind: kind, parsingStrategy: parsingStrategy, parser: parser, parseType: type, default: initial, completion: completion, help: ArgumentDefinition.Help(key: key))
+  }
+
+  /// Create a unary / argument that parses using the given closure.
+  init<A: ExpressibleByArgument>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ParsingStrategy = .default, parser: @escaping (String) -> A?, parseType type: A.Type = A.self, default initial: A?, completion: CompletionKind) {
+    self.init(key: key, kind: kind, parsingStrategy: parsingStrategy, parser: parser, parseType: type, default: initial, completion: completion, help: ArgumentDefinition.Help(type: A.self, key: key))
+  }
+
+  private init<A>(key: InputKey, kind: ArgumentDefinition.Kind, parsingStrategy: ParsingStrategy = .default, parser: @escaping (String) -> A?, parseType type: A.Type = A.self, default initial: A?, completion: CompletionKind, help: ArgumentDefinition.Help) {
+    self.init(kind: kind, help: help, completion: completion, parsingStrategy: parsingStrategy, update: .unary({ (origin, name, value, values) in
       guard let v = parser(value) else {
         throw ParserError.unableToParseValue(origin, name, value, forKey: key)
       }
       values.set(v, forKey: key, inputOrigin: origin)
-    }), initial: initialValueCreator)
-    
-    help.options.formUnion(ArgumentDefinition.Help.Options(type: type))
-    help.defaultValue = initial.map { "\($0)" }
+    }), initial: { origin, values in
+      switch kind {
+      case .default:
+        values.set(initial, forKey: key, inputOrigin: InputOrigin(element: .defaultValue))
+      case .named, .positional:
+        values.set(initial, forKey: key, inputOrigin: origin)
+      }
+    })
+
+    self.help.options.formUnion(ArgumentDefinition.Help.Options(type: type))
+    self.help.defaultValue = initial.map { "\($0)" }
     if initial != nil {
       self = self.optional
     }
   }
 }
 
+extension ArgumentDefinition {
+  /// Creates an argument definition for a property that isn't parsed from the
+  /// command line.
+  ///
+  /// This initializer is used for any property defined on a `ParsableArguments`
+  /// type that isn't decorated with one of ArgumentParser's property wrappers.
+  init(unparsedKey: String, default defaultValue: Any?) {
+    self.init(
+      key: InputKey(rawValue: unparsedKey),
+      kind: .default,
+      parser: { _ in nil },
+      default: defaultValue,
+      completion: .default)
+    help.updateArgumentHelp(help: .private)
+  }
+}
+
 // MARK: - Parsing from SplitArguments
 extension ArgumentSet {
-  /// Parse the given input (`SplitArguments`) for the given `commandStack` of previously parsed commands.
+  /// Parse the given input for this set of defined arguments.
   ///
-  /// This method will gracefully fail if there are extra arguments that it doesn’t understand. Hence the
-  /// *lenient* name. If so, it will return `.partial`.
+  /// This method will consume only the arguments that it understands. If any
+  /// arguments are declared to capture all remaining input, or a subcommand
+  /// is configured as such, parsing stops on the first positional argument or
+  /// unrecognized dash-prefixed argument.
   ///
-  /// When dealing with commands, this will be called iteratively in order to find
-  /// the matching command(s).
-  ///
-  /// - Parameter all: The input (from the command line) that needs to be parsed
-  /// - Parameter commandStack: commands that have been parsed
-  func lenientParse(_ all: SplitArguments) throws -> ParsedValues {
+  /// - Parameter input: The input that needs to be parsed.
+  /// - Parameter subcommands: Any subcommands of the current command.
+  /// - Parameter defaultCapturesAll: `true` if the default subcommand has an
+  ///   argument that captures all remaining input.
+  func lenientParse(
+    _ input: SplitArguments,
+    subcommands: [ParsableCommand.Type],
+    defaultCapturesAll: Bool
+  ) throws -> ParsedValues {
     // Create a local, mutable copy of the arguments:
-    var inputArguments = all
+    var inputArguments = input
     
     func parseValue(
       _ argument: ArgumentDefinition,
@@ -197,11 +245,19 @@ extension ArgumentSet {
     ) throws {
       let origin = InputOrigin(elements: [originElement])
       switch argument.parsingStrategy {
-      case .nextAsValue:
+      case .default:
         // We need a value for this option.
         if let value = parsed.value {
           // This was `--foo=bar` style:
           try update(origin, parsed.name, value, &result)
+          usedOrigins.formUnion(origin)
+        } else if argument.allowsJoinedValue,
+           let (origin2, value) = inputArguments.extractJoinedElement(at: originElement)
+        {
+          // Found a joined argument
+          let origins = origin.inserting(origin2)
+          try update(origins, parsed.name, String(value), &result)
+          usedOrigins.formUnion(origins)
         } else if let (origin2, value) = inputArguments.popNextElementIfValue(after: originElement) {
           // Use `popNextElementIfValue(after:)` to handle cases where short option
           // labels are combined
@@ -217,6 +273,13 @@ extension ArgumentSet {
         if let value = parsed.value {
           // This was `--foo=bar` style:
           try update(origin, parsed.name, value, &result)
+          usedOrigins.formUnion(origin)
+        } else if argument.allowsJoinedValue,
+            let (origin2, value) = inputArguments.extractJoinedElement(at: originElement) {
+          // Found a joined argument
+          let origins = origin.inserting(origin2)
+          try update(origins, parsed.name, String(value), &result)
+          usedOrigins.formUnion(origins)
         } else if let (origin2, value) = inputArguments.popNextValue(after: originElement) {
           // Use `popNext(after:)` to handle cases where short option
           // labels are combined
@@ -233,6 +296,12 @@ extension ArgumentSet {
           // This was `--foo=bar` style:
           try update(origin, parsed.name, value, &result)
           usedOrigins.formUnion(origin)
+        } else if argument.allowsJoinedValue,
+            let (origin2, value) = inputArguments.extractJoinedElement(at: originElement) {
+          // Found a joined argument
+          let origins = origin.inserting(origin2)
+          try update(origins, parsed.name, String(value), &result)
+          usedOrigins.formUnion(origins)
         } else {
           guard let (origin2, value) = inputArguments.popNextElementAsValue(after: originElement) else {
             throw ParserError.missingValueForOption(origin, parsed.name)
@@ -251,6 +320,13 @@ extension ArgumentSet {
           // This was `--foo=bar` style:
           try update(origin, parsed.name, value, &result)
           usedOrigins.formUnion(origin)
+        } else if argument.allowsJoinedValue,
+            let (origin2, value) = inputArguments.extractJoinedElement(at: originElement) {
+          // Found a joined argument
+          let origins = origin.inserting(origin2)
+          try update(origins, parsed.name, String(value), &result)
+          usedOrigins.formUnion(origins)
+          inputArguments.removeAll(in: usedOrigins)
         }
         
         // ...and then consume the rest of the arguments
@@ -261,14 +337,31 @@ extension ArgumentSet {
         }
         
       case .upToNextOption:
-        // Reset initial value with the found source index
-        try argument.initial(origin, &result)
-        
         // Use an attached value if it exists...
         if let value = parsed.value {
           // This was `--foo=bar` style:
           try update(origin, parsed.name, value, &result)
           usedOrigins.formUnion(origin)
+        } else if argument.allowsJoinedValue,
+            let (origin2, value) = inputArguments.extractJoinedElement(at: originElement) {
+          // Found a joined argument
+          let origins = origin.inserting(origin2)
+          try update(origins, parsed.name, String(value), &result)
+          usedOrigins.formUnion(origins)
+          inputArguments.removeAll(in: usedOrigins)
+        }
+        
+        // Clear out the initial origin first, since it can include
+        // the exploded elements of an options group (see issue #327).
+        usedOrigins.formUnion(origin)
+        inputArguments.removeAll(in: origin)
+        
+        // Fix incorrect error message
+        // for @Option array without values (see issue #434).
+        guard let first = inputArguments.elements.first,
+              first.isValue
+        else {
+          throw ParserError.missingValueForOption(origin, parsed.name)
         }
         
         // ...and then consume the arguments until hitting an option
@@ -280,12 +373,21 @@ extension ArgumentSet {
       }
     }
     
-    var result = ParsedValues(elements: [:], originalInput: all.originalInput)
+    // If this argument set includes a positional argument that unconditionally
+    // captures all remaining input, we use a different behavior, where we
+    // shortcut out at the first sign of a positional argument or unrecognized
+    // option/flag label.
+    let capturesAll = defaultCapturesAll || self.contains(where: { arg in
+      arg.isRepeatingPositional && arg.parsingStrategy == .allRemainingInput
+    })
+    
+    var result = ParsedValues(elements: [:], originalInput: input.originalInput)
     var allUsedOrigins = InputOrigin()
     
     try setInitialValues(into: &result)
     
     // Loop over all arguments:
+    ArgumentLoop:
     while let (origin, next) = inputArguments.popNext() {
       var usedOrigins = InputOrigin()
       defer {
@@ -294,7 +396,22 @@ extension ArgumentSet {
       }
       
       switch next.value {
-      case .value:
+      case .value(let argument):
+        // Special handling for matching subcommand names. We generally want
+        // parsing to skip over unrecognized input, but if the current
+        // command or the matched subcommand captures all remaining input,
+        // then we want to break out of parsing at this point.
+        if let matchedSubcommand = subcommands.first(where: { $0._commandName == argument }) {
+          if !matchedSubcommand.includesUnconditionalArguments && defaultCapturesAll {
+            continue ArgumentLoop
+          } else if matchedSubcommand.includesUnconditionalArguments {
+            break ArgumentLoop
+          }
+        }
+        
+        // If we're capturing all, the first positional value represents the
+        // start of positional input.
+        if capturesAll { break ArgumentLoop }
         // We'll parse positional values later.
         break
       case let .option(parsed):
@@ -302,8 +419,19 @@ extension ArgumentSet {
         // input. If we can't find one, just move on to the next input. We
         // defer catching leftover arguments until we've fully extracted all
         // the information for the selected command.
-        guard let argument = first(matching: parsed)
-          else { continue }
+        guard let argument = first(matching: parsed) else
+        {
+          // If we're capturing all, an unrecognized option/flag is the start
+          // of positional input. However, the first time we see an option
+          // pack (like `-fi`) it looks like a long name with a single-dash
+          // prefix, which may not match an argument even if its subcomponents
+          // will match.
+          if capturesAll && parsed.subarguments.isEmpty { break ArgumentLoop }
+          
+          // Otherwise, continue parsing. This option/flag may get picked up
+          // by a child command.
+          continue
+        }
         
         switch argument.update {
         case let .nullary(update):
@@ -324,7 +452,7 @@ extension ArgumentSet {
     
     // We have parsed all non-positional values at this point.
     // Next: parse / consume the positional values.
-    var unusedArguments = all
+    var unusedArguments = input
     unusedArguments.removeAll(in: allUsedOrigins)
     try parsePositionalValues(from: unusedArguments, into: &result)
 

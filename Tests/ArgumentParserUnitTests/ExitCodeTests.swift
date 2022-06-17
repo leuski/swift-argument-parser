@@ -76,3 +76,15 @@ extension ExitCodeTests {
     }
   }
 }
+
+// MARK: - NSError tests
+
+extension ExitCodeTests {
+  func testNSErrorIsHandled() {
+    struct NSErrorCommand: ParsableCommand {
+      static let fileNotFoundNSError = NSError(domain: "", code: 1, userInfo: [NSLocalizedDescriptionKey: "The file “foo/bar” couldn’t be opened because there is no such file"])
+    }
+    XCTAssertEqual(NSErrorCommand.exitCode(for: NSErrorCommand.fileNotFoundNSError), ExitCode(rawValue: 1))
+    XCTAssertEqual(NSErrorCommand.message(for: NSErrorCommand.fileNotFoundNSError), "The file “foo/bar” couldn’t be opened because there is no such file")
+  }
+}

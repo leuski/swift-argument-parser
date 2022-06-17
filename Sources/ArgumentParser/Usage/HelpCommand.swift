@@ -12,37 +12,54 @@
 struct HelpCommand: ParsableCommand {
   static var configuration = CommandConfiguration(
     commandName: "help",
-    abstract: "Show subcommand help information.")
+    abstract: "Show subcommand help information.",
+    helpNames: [])
   
+  /// Any subcommand names provided after the `help` subcommand.
   @Argument var subcommands: [String] = []
   
-  private(set) var commandStack: [ParsableCommand.Type] = []
+  /// Capture and ignore any extra help flags given by the user.
+  @Flag(name: [.short, .long, .customLong("help", withSingleDash: true)], help: .private)
+  var help = false
   
+  private(set) var commandStack: [ParsableCommand.Type] = []
+  private(set) var visibility: ArgumentVisibility = .default
+
   init() {}
   
   mutating func run() throws {
-    throw CommandError(commandStack: commandStack, parserError: .helpRequested)
+    throw CommandError(
+      commandStack: commandStack,
+      parserError: .helpRequested(visibility: visibility))
   }
   
   mutating func buildCommandStack(with parser: CommandParser) throws {
     commandStack = parser.commandStack(for: subcommands)
   }
-  
-  func generateHelp() -> String {
-    return HelpGenerator(commandStack: commandStack).rendered()
+
+  /// Used for testing.
+  func generateHelp(screenWidth: Int) -> String {
+    HelpGenerator(
+      commandStack: commandStack,
+      visibility: visibility)
+      .rendered(screenWidth: screenWidth)
   }
   
   enum CodingKeys: CodingKey {
     case subcommands
+    case help
   }
   
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    self._subcommands = Argument(_parsedValue: .value(try container.decode([String].self, forKey: .subcommands)))
+    self.subcommands = try container.decode([String].self, forKey: .subcommands)
+    self.help = try container.decode(Bool.self, forKey: .help)
   }
   
-  init(commandStack: [ParsableCommand.Type]) {
+  init(commandStack: [ParsableCommand.Type], visibility: ArgumentVisibility) {
     self.commandStack = commandStack
-    self._subcommands = Argument(_parsedValue: .value(commandStack.map { $0._commandName }))
+    self.visibility = visibility
+    self.subcommands = commandStack.map { $0._commandName }
+    self.help = false
   }
 }

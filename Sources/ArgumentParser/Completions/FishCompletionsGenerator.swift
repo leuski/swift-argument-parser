@@ -2,8 +2,8 @@ struct FishCompletionsGenerator {
   static func generateCompletionScript(_ type: ParsableCommand.Type) -> String {
     let programName = type._commandName
     let helper = """
-    function __fish_\(programName)_using_command
-        set cmd (commandline -opc)
+    function _swift_\(programName)_using_command
+        set -l cmd (commandline -opc)
         if [ (count $cmd) -eq (count $argv) ]
             for i in (seq (count $argv))
                 if [ $cmd[$i] != $argv[$i] ]
@@ -14,7 +14,7 @@ struct FishCompletionsGenerator {
         end
         return 1
     end
-
+    
     """
 
     let completions = generateCompletions(commandChain: [programName], [type])
@@ -30,6 +30,7 @@ struct FishCompletionsGenerator {
     let isRootCommand = commands.count == 1
     let programName = commandChain[0]
     var subcommands = type.configuration.subcommands
+      .filter { $0.configuration.shouldDisplay }
 
     if !subcommands.isEmpty {
       if isRootCommand {
@@ -37,11 +38,11 @@ struct FishCompletionsGenerator {
       }
     }
 
-    let prefix = "complete -c \(programName) -n '__fish_\(programName)_using_command"
+    let prefix = "complete -c \(programName) -n '_swift_\(programName)_using_command"
     /// We ask each suggestion to produce 2 pieces of information
     /// - Parameters
     ///   - ancestors: a list of "ancestor" which must be present in the current shell buffer for
-    ///                this suggetion to be considered. This could be a combination of (nested)
+    ///                this suggestion to be considered. This could be a combination of (nested)
     ///                subcommands and flags.
     ///   - suggestion: text for the actual suggestion
     /// - Returns: A completion expression
@@ -55,7 +56,8 @@ struct FishCompletionsGenerator {
       return complete(ancestors: commandChain, suggestion: suggestion)
     }
 
-    let argumentCompletions = ArgumentSet(type)
+    let argumentCompletions = commands
+      .argumentsForHelp(visibility: .default)
       .flatMap { $0.argumentSegments(commandChain) }
       .map { complete(ancestors: $0, suggestion: $1) }
 
@@ -78,7 +80,7 @@ extension Name {
     switch self {
     case .long(let longName):
       return "-l \(longName)"
-    case .short(let shortName):
+    case .short(let shortName, _):
       return "-s \(shortName)"
     case .longWithSingleDash(let dashedName):
       return "-o \(dashedName)"
@@ -89,7 +91,7 @@ extension Name {
     switch self {
     case .long(let longName):
       return "--\(longName)"
-    case .short(let shortName):
+    case .short(let shortName, _):
       return "-\(shortName)"
     case .longWithSingleDash(let dashedName):
       return "-\(dashedName)"
@@ -99,11 +101,13 @@ extension Name {
 
 extension ArgumentDefinition {
   fileprivate func argumentSegments(_ commandChain: [String]) -> [([String], String)] {
+    guard help.visibility.base == .default else { return [] }
+
     var results = [([String], String)]()
     var formattedFlags = [String]()
     var flags = [String]()
     switch self.kind {
-    case .positional:
+    case .positional, .default:
       break
     case .named(let names):
       flags = names.map { $0.asFishSuggestion }
@@ -111,8 +115,8 @@ extension ArgumentDefinition {
       if !flags.isEmpty {
         // add these flags to suggestions
         var suggestion = "-f\(isNullary ? "" : " -r") \(flags.joined(separator: " "))"
-        if let abstract = help.help?.abstract, !abstract.isEmpty {
-          suggestion += " -d '\(abstract.fishEscape())'"
+        if !help.abstract.isEmpty {
+          suggestion += " -d '\(help.abstract.fishEscape())'"
         }
 
         results.append((commandChain, suggestion))

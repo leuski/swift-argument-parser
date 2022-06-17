@@ -18,6 +18,8 @@ let _exit: (Int32) -> Never = Darwin.exit
 #elseif canImport(CRT)
 import CRT
 let _exit: (Int32) -> Never = ucrt._exit
+#elseif canImport(WASILibc)
+import WASILibc
 #endif
 
 /// A type that can be parsed from a program's command-line arguments.
@@ -93,8 +95,8 @@ extension ParsableArguments {
   ) throws -> Self {
     // Parse the command and unwrap the result if necessary.
     switch try self.asCommand.parseAsRoot(arguments) {
-    case is HelpCommand:
-      throw ParserError.helpRequested
+    case let helpCommand as HelpCommand:
+      throw ParserError.helpRequested(visibility: helpCommand.visibility)
     case let result as _WrappedParsableCommand<Self>:
       return result.options
     case var result as Self:
@@ -130,15 +132,44 @@ extension ParsableArguments {
   ) -> String {
     MessageInfo(error: error, type: self).fullText(for: self)
   }
-  
+
   /// Returns the text of the help screen for this type.
   ///
-  /// - Parameter columns: The column width to use when wrapping long lines in
-  ///   the help screen. If `columns` is `nil`, uses the current terminal width,
-  ///   or a default value of `80` if the terminal width is not available.
+  /// - Parameters:
+  ///   - columns: The column width to use when wrapping long line in the
+  ///     help screen. If `columns` is `nil`, uses the current terminal
+  ///     width, or a default value of `80` if the terminal width is not
+  ///     available.
   /// - Returns: The full help screen for this type.
-  public static func helpMessage(columns: Int? = nil) -> String {
-    HelpGenerator(self).rendered(screenWidth: columns)
+  @_disfavoredOverload
+  @available(*, deprecated, message: "Use helpMessage(includeHidden:columns:) instead.")
+  public static func helpMessage(
+    columns: Int?
+  ) -> String {
+    helpMessage(includeHidden: false, columns: columns)
+  }
+
+  /// Returns the text of the help screen for this type.
+  ///
+  /// - Parameters:
+  ///   - includeHidden: Include hidden help information in the generated
+  ///     message.
+  ///   - columns: The column width to use when wrapping long line in the
+  ///     help screen. If `columns` is `nil`, uses the current terminal
+  ///     width, or a default value of `80` if the terminal width is not
+  ///     available.
+  /// - Returns: The full help screen for this type.
+  public static func helpMessage(
+    includeHidden: Bool = false,
+    columns: Int? = nil
+  ) -> String {
+    HelpGenerator(self, visibility: includeHidden ? .hidden : .default)
+      .rendered(screenWidth: columns)
+  }
+
+  /// Returns the JSON representation of this type.
+  public static func _dumpHelp() -> String {
+    DumpHelpGenerator(self).rendered()
   }
 
   /// Returns the exit code for the given error.
@@ -208,13 +239,37 @@ extension ParsableArguments {
   }
 }
 
+/// Unboxes the given value if it is a `nil` value.
+///
+/// If the value passed is the `.none` case of any optional type, this function
+/// returns `nil`.
+///
+///     let intAsAny = (1 as Int?) as Any
+///     let nilAsAny = (nil as Int?) as Any
+///     nilOrValue(intAsAny)      // Optional(1) as Any?
+///     nilOrValue(nilAsAny)      // nil as Any?
+func nilOrValue(_ value: Any) -> Any? {
+  if case Optional<Any>.none = value {
+    return nil
+  } else {
+    return value
+  }
+}
+
+/// Existential protocol for property wrappers, so that they can provide
+/// the argument set that they define.
 protocol ArgumentSetProvider {
   func argumentSet(for key: InputKey) -> ArgumentSet
+    
+  var _visibility: ArgumentVisibility { get }
+}
+
+extension ArgumentSetProvider {
+  var _visibility: ArgumentVisibility { .default }
 }
 
 extension ArgumentSet {
-  init(_ type: ParsableArguments.Type) {
-    
+  init(_ type: ParsableArguments.Type, visibility: ArgumentVisibility) {
     #if DEBUG
     do {
       try type._validate()
@@ -226,18 +281,26 @@ extension ArgumentSet {
     let a: [ArgumentSet] = Mirror(reflecting: type.init())
       .children
       .compactMap { child in
-        guard
-          var codingKey = child.label,
-          let parsed = child.value as? ArgumentSetProvider
-          else { return nil }
+        guard var codingKey = child.label else { return nil }
         
-        // Property wrappers have underscore-prefixed names
-        codingKey = String(codingKey.first == "_" ? codingKey.dropFirst(1) : codingKey.dropFirst(0))
-        
-        let key = InputKey(rawValue: codingKey)
-        return parsed.argumentSet(for: key)
-    }
-    self.init(sets: a)
+        if let parsed = child.value as? ArgumentSetProvider {
+          guard parsed._visibility.isAtLeastAsVisible(as: visibility)
+            else { return nil }
+
+          // Property wrappers have underscore-prefixed names
+          codingKey = String(codingKey.first == "_"
+                              ? codingKey.dropFirst(1)
+                              : codingKey.dropFirst(0))
+          let key = InputKey(rawValue: codingKey)
+          return parsed.argumentSet(for: key)
+        } else {
+          // Save a non-wrapped property as is
+          return ArgumentSet(
+            ArgumentDefinition(unparsedKey: codingKey, default: nilOrValue(child.value)))
+        }
+      }
+    self.init(
+      a.joined().filter { $0.help.visibility.isAtLeastAsVisible(as: visibility) })
   }
 }
 

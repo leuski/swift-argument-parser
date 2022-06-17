@@ -10,25 +10,42 @@
 //===----------------------------------------------------------------------===//
 
 struct ArgumentDefinition {
+  /// A closure that modifies a `ParsedValues` instance to include this
+  /// argument's value.
   enum Update {
     typealias Nullary = (InputOrigin, Name?, inout ParsedValues) throws -> Void
     typealias Unary = (InputOrigin, Name?, String, inout ParsedValues) throws -> Void
     
+    /// An argument that gets its value solely from its presence.
     case nullary(Nullary)
+    
+    /// An argument that takes a string as its value.
     case unary(Unary)
   }
   
   typealias Initial = (InputOrigin, inout ParsedValues) throws -> Void
   
   enum Kind {
+    /// An option or flag, with a name and an optional value.
     case named([Name])
+    
+    /// A positional argument.
     case positional
+    
+    /// A pseudo-argument that takes its value from a property's default value
+    /// instead of from command-line arguments.
+    case `default`
   }
   
   struct Help {
     var options: Options
-    var help: ArgumentHelp?
-    var discussion: String?
+
+    // `ArgumentHelp` members
+    var abstract: String = ""
+    var discussion: String = ""
+    var valueName: String = ""
+    var visibility: ArgumentVisibility = .default
+
     var defaultValue: String?
     var keys: [InputKey]
     var allValues: [String] = []
@@ -36,25 +53,33 @@ struct ArgumentDefinition {
     
     struct Options: OptionSet {
       var rawValue: UInt
-      
+
       static let isOptional = Options(rawValue: 1 << 0)
       static let isRepeating = Options(rawValue: 1 << 1)
     }
-    
-    init(options: Options = [], help: ArgumentHelp? = nil, defaultValue: String? = nil, key: InputKey, isComposite: Bool = false) {
+
+    init(allValues: [String] = [], options: Options = [], help: ArgumentHelp? = nil, defaultValue: String? = nil, key: InputKey, isComposite: Bool = false) {
       self.options = options
-      self.help = help
       self.defaultValue = defaultValue
       self.keys = [key]
+      self.allValues = allValues
       self.isComposite = isComposite
+      updateArgumentHelp(help: help)
     }
-    
+
     init<T: ExpressibleByArgument>(type: T.Type, options: Options = [], help: ArgumentHelp? = nil, defaultValue: String? = nil, key: InputKey) {
       self.options = options
-      self.help = help
       self.defaultValue = defaultValue
       self.keys = [key]
       self.allValues = type.allValueStrings
+      updateArgumentHelp(help: help)
+    }
+
+    mutating func updateArgumentHelp(help: ArgumentHelp?) {
+      self.abstract = help?.abstract ?? ""
+      self.discussion = help?.discussion ?? ""
+      self.valueName = help?.valueName ?? ""
+      self.visibility = help?.visibility ?? .default
     }
   }
   
@@ -63,7 +88,7 @@ struct ArgumentDefinition {
   enum ParsingStrategy {
     /// Expect the next `SplitArguments.Element` to be a value and parse it. Will fail if the next
     /// input is an option.
-    case nextAsValue
+    case `default`
     /// Parse the next `SplitArguments.Element.value`
     case scanningForValue
     /// Parse the next `SplitArguments.Element` as a value, regardless of its type.
@@ -84,22 +109,23 @@ struct ArgumentDefinition {
   var names: [Name] {
     switch kind {
     case .named(let n): return n
-    case .positional: return []
+    case .positional, .default: return []
     }
   }
   
   var valueName: String {
-    return help.help?.valueName
-      ?? preferredNameForSynopsis?.valueString
-      ?? help.keys.first?.rawValue.convertedToSnakeCase(separator: "-")
-      ?? "value"
+    help.valueName.mapEmpty {
+      names.preferredName?.valueString
+        ?? help.keys.first?.rawValue.convertedToSnakeCase(separator: "-")
+        ?? "value"
+    }
   }
-  
+
   init(
     kind: Kind,
     help: Help,
     completion: CompletionKind,
-    parsingStrategy: ParsingStrategy = .nextAsValue,
+    parsingStrategy: ParsingStrategy = .default,
     update: Update,
     initial: @escaping Initial = { _, _ in }
   ) {
@@ -113,32 +139,6 @@ struct ArgumentDefinition {
     self.parsingStrategy = parsingStrategy
     self.update = update
     self.initial = initial
-  }
-}
-
-extension ArgumentDefinition.ParsingStrategy {
-  init(_ other: SingleValueParsingStrategy) {
-    switch other {
-    case .next:
-      self = .nextAsValue
-    case .scanningForValue:
-      self = .scanningForValue
-    case .unconditional:
-      self = .unconditional
-    }
-  }
-  
-  init(_ other: ArrayParsingStrategy) {
-    switch other {
-    case .singleValue:
-      self = .scanningForValue
-    case .unconditionalSingleValue:
-      self = .unconditional
-    case .upToNextOption:
-      self = .upToNextOption
-    case .remaining:
-      self = .allRemainingInput
-    }
   }
 }
 
@@ -156,6 +156,8 @@ extension ArgumentDefinition: CustomDebugStringConvertible {
         + " <\(valueName)>"
     case (.positional, _):
       return "<\(valueName)>"
+    case (.default, _):
+      return ""
     }
   }
 }
@@ -163,7 +165,6 @@ extension ArgumentDefinition: CustomDebugStringConvertible {
 extension ArgumentDefinition {
   var optional: ArgumentDefinition {
     var result = self
-    
     result.help.options.insert(.isOptional)
     return result
   }
@@ -193,6 +194,10 @@ extension ArgumentDefinition {
     } else {
       return false
     }
+  }
+  
+  var allowsJoinedValue: Bool {
+    names.contains(where: { $0.allowsJoined })
   }
 }
 

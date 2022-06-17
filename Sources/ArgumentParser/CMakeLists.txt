@@ -6,6 +6,7 @@ add_library(ArgumentParser
 
   "Parsable Properties/Argument.swift"
   "Parsable Properties/ArgumentHelp.swift"
+  "Parsable Properties/ArgumentVisibility.swift"
   "Parsable Properties/CompletionKind.swift"
   "Parsable Properties/Errors.swift"
   "Parsable Properties/Flag.swift"
@@ -13,6 +14,7 @@ add_library(ArgumentParser
   "Parsable Properties/Option.swift"
   "Parsable Properties/OptionGroup.swift"
 
+  "Parsable Types/AsyncParsableCommand.swift"
   "Parsable Types/CommandConfiguration.swift"
   "Parsable Types/EnumerableFlag.swift"
   "Parsable Types/ExpressibleByArgument.swift"
@@ -31,11 +33,13 @@ add_library(ArgumentParser
   Parsing/ParserError.swift
   Parsing/SplitArguments.swift
 
+  Usage/DumpHelpGenerator.swift
   Usage/HelpCommand.swift
   Usage/HelpGenerator.swift
   Usage/MessageInfo.swift
   Usage/UsageGenerator.swift
 
+  Utilities/CollectionExtensions.swift
   Utilities/SequenceExtensions.swift
   Utilities/StringExtensions.swift
   Utilities/Tree.swift)
@@ -45,7 +49,8 @@ set_target_properties(ArgumentParser PROPERTIES
 target_compile_options(ArgumentParser PRIVATE
   $<$<BOOL:${BUILD_TESTING}>:-enable-testing>)
 target_link_libraries(ArgumentParser PRIVATE
-  $<$<NOT:$<PLATFORM_ID:Darwin>>:Foundation>)
+  $<$<NOT:$<PLATFORM_ID:Darwin>>:Foundation>
+  ArgumentParserToolInfo)
 
 
 _install_target(ArgumentParser)

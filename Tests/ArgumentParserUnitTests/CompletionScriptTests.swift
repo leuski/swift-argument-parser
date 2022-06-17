@@ -41,6 +41,8 @@ extension CompletionScriptTests {
     @Option() var path1: Path
     @Option() var path2: Path?
     @Option(completion: .list(["a", "b", "c"])) var path3: Path
+    
+    @Flag(help: .hidden) var verbose = false
   }
 
   func testBase_Zsh() throws {
@@ -59,7 +61,6 @@ extension CompletionScriptTests {
   func testBase_Bash() throws {
     let script1 = try CompletionsGenerator(command: Base.self, shell: .bash)
           .generateCompletionScript()
-
     XCTAssertEqual(bashBaseCompletions, script1)
     
     let script2 = try CompletionsGenerator(command: Base.self, shellName: "bash")
@@ -123,13 +124,16 @@ extension CompletionScriptTests {
 }
 
 extension CompletionScriptTests {
-  struct Escaped: ParsableCommand {
+  struct EscapedCommand: ParsableCommand {
     @Option(help: #"Escaped chars: '[]\."#)
     var one: String
+    
+    @Argument(completion: .custom { _ in ["d", "e", "f"] })
+    var two: String
   }
 
   func testEscaped_Zsh() throws {
-    XCTAssertEqual(zshEscapedCompletion, Escaped.completionScript(for: .zsh))
+    XCTAssertEqual(zshEscapedCompletion, EscapedCommand.completionScript(for: .zsh))
   }
 }
 
@@ -149,7 +153,7 @@ _base() {
         '--path1:path1:_files'
         '--path2:path2:_files'
         '--path3:path3:(a b c)'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -179,7 +183,7 @@ _base() {
     fi
     case $prev in
         --name)
-            
+
             return
         ;;
         --kind)
@@ -211,17 +215,18 @@ complete -F _base base
 """
 
 private let zshEscapedCompletion = """
-#compdef escaped
+#compdef escaped-command
 local context state state_descr line
-_escaped_commandname=$words[1]
+_escaped_command_commandname=$words[1]
 typeset -A opt_args
 
-_escaped() {
+_escaped-command() {
     integer ret=1
     local -a args
     args+=(
         '--one[Escaped chars: '"'"'\\[\\]\\\\.]:one:'
-        '(-h --help)'{-h,--help}'[Print help information.]'
+        ':two:{_custom_completion $_escaped_command_commandname ---completion  -- two $words}'
+        '(-h --help)'{-h,--help}'[Show help information.]'
     )
     _arguments -w -s -S $args[@] && ret=0
 
@@ -234,12 +239,12 @@ _custom_completion() {
     _describe '' completions
 }
 
-_escaped
+_escaped-command
 """
 
 private let fishBaseCompletions = """
-function __fish_base_using_command
-    set cmd (commandline -opc)
+function _swift_base_using_command
+    set -l cmd (commandline -opc)
     if [ (count $cmd) -eq (count $argv) ]
         for i in (seq (count $argv))
             if [ $cmd[$i] != $argv[$i] ]
@@ -250,15 +255,127 @@ function __fish_base_using_command
     end
     return 1
 end
-complete -c base -n '__fish_base_using_command base' -f -r -l name -d 'The user\\'s name.'
-complete -c base -n '__fish_base_using_command base' -f -r -l kind
-complete -c base -n '__fish_base_using_command base --kind' -f -k -a 'one two custom-three'
-complete -c base -n '__fish_base_using_command base' -f -r -l other-kind
-complete -c base -n '__fish_base_using_command base --other-kind' -f -k -a '1 2 3'
-complete -c base -n '__fish_base_using_command base' -f -r -l path1
-complete -c base -n '__fish_base_using_command base --path1' -f -a '(for i in *.{}; echo $i;end)'
-complete -c base -n '__fish_base_using_command base' -f -r -l path2
-complete -c base -n '__fish_base_using_command base --path2' -f -a '(for i in *.{}; echo $i;end)'
-complete -c base -n '__fish_base_using_command base' -f -r -l path3
-complete -c base -n '__fish_base_using_command base --path3' -f -k -a 'a b c'
+complete -c base -n '_swift_base_using_command base' -f -r -l name -d 'The user\\'s name.'
+complete -c base -n '_swift_base_using_command base' -f -r -l kind
+complete -c base -n '_swift_base_using_command base --kind' -f -k -a 'one two custom-three'
+complete -c base -n '_swift_base_using_command base' -f -r -l other-kind
+complete -c base -n '_swift_base_using_command base --other-kind' -f -k -a '1 2 3'
+complete -c base -n '_swift_base_using_command base' -f -r -l path1
+complete -c base -n '_swift_base_using_command base --path1' -f -a '(for i in *.{}; echo $i;end)'
+complete -c base -n '_swift_base_using_command base' -f -r -l path2
+complete -c base -n '_swift_base_using_command base --path2' -f -a '(for i in *.{}; echo $i;end)'
+complete -c base -n '_swift_base_using_command base' -f -r -l path3
+complete -c base -n '_swift_base_using_command base --path3' -f -k -a 'a b c'
+complete -c base -n '_swift_base_using_command base' -f -s h -l help -d 'Show help information.'
+"""
+
+// MARK: - Test Hidden Subcommand
+struct Parent: ParsableCommand {
+    static var configuration = CommandConfiguration(subcommands: [HiddenChild.self])
+}
+
+struct HiddenChild: ParsableCommand {
+    static var configuration = CommandConfiguration(shouldDisplay: false)
+}
+
+extension CompletionScriptTests {
+  func testHiddenSubcommand_Zsh() throws {
+    let script1 = try CompletionsGenerator(command: Parent.self, shell: .zsh)
+          .generateCompletionScript()
+    XCTAssertEqual(zshHiddenCompletion, script1)
+
+    let script2 = try CompletionsGenerator(command: Parent.self, shellName: "zsh")
+          .generateCompletionScript()
+    XCTAssertEqual(zshHiddenCompletion, script2)
+
+    let script3 = Parent.completionScript(for: .zsh)
+    XCTAssertEqual(zshHiddenCompletion, script3)
+  }
+
+  func testHiddenSubcommand_Bash() throws {
+    let script1 = try CompletionsGenerator(command: Parent.self, shell: .bash)
+          .generateCompletionScript()
+    XCTAssertEqual(bashHiddenCompletion, script1)
+
+    let script2 = try CompletionsGenerator(command: Parent.self, shellName: "bash")
+          .generateCompletionScript()
+    XCTAssertEqual(bashHiddenCompletion, script2)
+
+    let script3 = Parent.completionScript(for: .bash)
+    XCTAssertEqual(bashHiddenCompletion, script3)
+  }
+
+  func testHiddenSubcommand_Fish() throws {
+    let script1 = try CompletionsGenerator(command: Parent.self, shell: .fish)
+          .generateCompletionScript()
+    XCTAssertEqual(fishHiddenCompletion, script1)
+
+    let script2 = try CompletionsGenerator(command: Parent.self, shellName: "fish")
+          .generateCompletionScript()
+    XCTAssertEqual(fishHiddenCompletion, script2)
+
+    let script3 = Parent.completionScript(for: .fish)
+    XCTAssertEqual(fishHiddenCompletion, script3)
+  }
+}
+
+let zshHiddenCompletion = """
+#compdef parent
+local context state state_descr line
+_parent_commandname=$words[1]
+typeset -A opt_args
+
+_parent() {
+    integer ret=1
+    local -a args
+    args+=(
+        '(-h --help)'{-h,--help}'[Show help information.]'
+    )
+    _arguments -w -s -S $args[@] && ret=0
+
+    return ret
+}
+
+
+_custom_completion() {
+    local completions=("${(@f)$($*)}")
+    _describe '' completions
+}
+
+_parent
+"""
+
+let bashHiddenCompletion = """
+#!/bin/bash
+
+_parent() {
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    COMPREPLY=()
+    opts="-h --help"
+    if [[ $COMP_CWORD == "1" ]]; then
+        COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+        return
+    fi
+    COMPREPLY=( $(compgen -W "$opts" -- "$cur") )
+}
+
+
+complete -F _parent parent
+"""
+
+let fishHiddenCompletion = """
+function _swift_parent_using_command
+    set -l cmd (commandline -opc)
+    if [ (count $cmd) -eq (count $argv) ]
+        for i in (seq (count $argv))
+            if [ $cmd[$i] != $argv[$i] ]
+                return 1
+            end
+        end
+        return 0
+    end
+    return 1
+end
+complete -c parent -n '_swift_parent_using_command parent' -f -s h -l help -d 'Show help information.'
 """

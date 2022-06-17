@@ -15,6 +15,8 @@ import Glibc
 import Darwin
 #elseif canImport(CRT)
 import CRT
+#elseif canImport(WASILibc)
+import WASILibc
 #endif
 
 /// A shell for which the parser can generate a completion script.
@@ -102,7 +104,7 @@ extension ArgumentDefinition {
   /// this argument.
   func customCompletionCall(_ commands: [ParsableCommand.Type]) -> String {
     let subcommandNames = commands.dropFirst().map { $0._commandName }.joined(separator: " ")
-    let argumentName = preferredNameForSynopsis?.synopsisString
+    let argumentName = names.preferredName?.synopsisString
           ?? self.help.keys.first?.rawValue ?? "---"
     return "---completion \(subcommandNames) -- \(argumentName)"
   }

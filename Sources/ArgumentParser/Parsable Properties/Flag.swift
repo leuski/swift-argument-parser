@@ -9,37 +9,67 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// A wrapper that represents a command-line flag.
+/// A property wrapper that represents a command-line flag.
 ///
-/// A flag is a defaulted Boolean or integer value that can be changed by
-/// specifying the flag on the command line. For example:
+/// Use the `@Flag` wrapper to define a property of your custom type as a
+/// command-line flag. A *flag* is a dash-prefixed label that can be provided on
+/// the command line, such as `-d` and `--debug`.
 ///
-///     struct Options: ParsableArguments {
-///         @Flag var verbose: Bool
+/// For example, the following program declares a flag that lets a user indicate
+/// that seconds should be included when printing the time.
+///
+///     @main
+///     struct Time: ParsableCommand {
+///         @Flag var includeSeconds = false
+///
+///         mutating func run() {
+///             if includeSeconds {
+///                 print(Date.now.formatted(.dateTime.hour().minute().second()))
+///             } else {
+///                 print(Date.now.formatted(.dateTime.hour().minute()))
+///             }
+///         }
 ///     }
 ///
-/// `verbose` has a default value of `false`, but becomes `true` if `--verbose`
-/// is provided on the command line.
+/// `includeSeconds` has a default value of `false`, but becomes `true` if
+/// `--include-seconds` is provided on the command line.
+///
+///     $ time
+///     11:09 AM
+///     $ time --include-seconds
+///     11:09:15 AM
 ///
 /// A flag can have a value that is a `Bool`, an `Int`, or any `EnumerableFlag`
 /// type. When using an `EnumerableFlag` type as a flag, the individual cases
 /// form the flags that are used on the command line.
 ///
-///     struct Options {
+///     @main
+///     struct Math: ParsableCommand {
 ///         enum Operation: EnumerableFlag {
 ///             case add
 ///             case multiply
 ///         }
 ///
 ///         @Flag var operation: Operation
+///
+///         mutating func run() {
+///             print("Time to \(operation)!")
+///         }
 ///     }
 ///
-///     // usage: command --add
-///     //    or: command --multiply
+/// Instead of using the name of the `operation` property as the flag in this
+/// case, the two cases of the `Operation` enumeration become valid flags.
+/// The `operation` property is neither optional nor given a default value, so
+/// one of the two flags is required.
+///
+///     $ math --add
+///     Time to add!
+///     $ math
+///     Error: Missing one of: '--add', '--multiply'
 @propertyWrapper
 public struct Flag<Value>: Decodable, ParsedWrapper {
   internal var _parsedValue: Parsed<Value>
-  
+
   internal init(_parsedValue: Parsed<Value>) {
     self._parsedValue = _parsedValue
   }
@@ -93,7 +123,14 @@ extension Flag: CustomStringConvertible {
 extension Flag: DecodableParsedWrapper where Value: Decodable {}
 
 /// The options for converting a Boolean flag into a `true`/`false` pair.
-public enum FlagInversion {
+public struct FlagInversion: Hashable {
+  internal enum Representation {
+    case prefixedNo
+    case prefixedEnableDisable
+  }
+  
+  internal var base: Representation
+  
   /// Adds a matching flag with a `no-` prefix to represent `false`.
   ///
   /// For example, the `shouldRender` property in this declaration is set to
@@ -102,7 +139,9 @@ public enum FlagInversion {
   ///
   ///     @Flag(name: .customLong("render"), inversion: .prefixedNo)
   ///     var shouldRender: Bool
-  case prefixedNo
+  public static var prefixedNo: FlagInversion {
+    self.init(base: .prefixedNo)
+  }
   
   /// Uses matching flags with `enable-` and `disable-` prefixes.
   ///
@@ -112,19 +151,35 @@ public enum FlagInversion {
   ///
   ///     @Flag(inversion: .prefixedEnableDisable)
   ///     var extraOutput: Bool
-  case prefixedEnableDisable
+  public static var prefixedEnableDisable: FlagInversion {
+    self.init(base: .prefixedEnableDisable)
+  }
 }
 
 /// The options for treating enumeration-based flags as exclusive.
-public enum FlagExclusivity {
+public struct FlagExclusivity: Hashable {
+  internal enum Representation {
+    case exclusive
+    case chooseFirst
+    case chooseLast
+  }
+  
+  internal var base: Representation
+  
   /// Only one of the enumeration cases may be provided.
-  case exclusive
+  public static var exclusive: FlagExclusivity {
+    self.init(base: .exclusive)
+  }
   
   /// The first enumeration case that is provided is used.
-  case chooseFirst
+  public static var chooseFirst: FlagExclusivity {
+    self.init(base: .chooseFirst)
+  }
   
   /// The last enumeration case that is provided is used.
-  case chooseLast
+  public static var chooseLast: FlagExclusivity {
+    self.init(base: .chooseLast)
+  }
 }
 
 extension Flag where Value == Optional<Bool> {
@@ -154,7 +209,14 @@ extension Flag where Value == Optional<Bool> {
     help: ArgumentHelp? = nil
   ) {
     self.init(_parsedValue: .init { key in
-      .flag(key: key, name: name, default: nil, inversion: inversion, exclusivity: exclusivity, help: help)
+      .flag(
+        key: key,
+        name: name,
+        default: nil,
+        required: false,
+        inversion: inversion,
+        exclusivity: exclusivity,
+        help: help)
     })
   }
 }
@@ -173,30 +235,10 @@ extension Flag where Value == Bool {
     })
   }
 
-  /// Creates a Boolean property that reads its value from the presence of a
-  /// flag.
-  ///
-  /// This property defaults to a value of `false`.
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - help: Information about how to use this flag.
-  @available(*, deprecated, message: "Provide an explicit default value of `false` for this flag (`@Flag var foo: Bool = false`)")
-  public init(
-    name: NameSpecification = .long,
-    help: ArgumentHelp? = nil
-  ) {
-    self.init(
-      name: name,
-      initial: false,
-      help: help
-    )
-  }
-
   /// Creates a Boolean property with default value provided by standard Swift default value syntax that reads its value from the presence of a flag.
   ///
   /// - Parameters:
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - name: A specification for what names are allowed for this flag.
   ///   - help: Information about how to use this flag.
   public init(
@@ -222,70 +264,15 @@ extension Flag where Value == Bool {
     help: ArgumentHelp?
   ) {
     self.init(_parsedValue: .init { key in
-      .flag(key: key, name: name, default: initial, inversion: inversion, exclusivity: exclusivity, help: help)
+      .flag(
+        key: key,
+        name: name,
+        default: initial,
+        required: initial == nil,
+        inversion: inversion,
+        exclusivity: exclusivity,
+        help: help)
       })
-  }
-
-  /// Creates a Boolean property that reads its value from the presence of
-  /// one or more inverted flags.
-  ///
-  /// /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:name:inversion:exclusivity:help:)` for properties with a default value
-  /// - `init(name:inversion:exclusivity:help:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Flag(default: true)
-  /// -var foo: Bool
-  /// +@Flag var foo: Bool = true
-  /// ```
-  ///
-  /// Use this initializer to create a Boolean flag with an on/off pair. With
-  /// the following declaration, for example, the user can specify either
-  /// `--use-https` or `--no-use-https` to set the `useHTTPS` flag to `true`
-  /// or `false`, respectively.
-  ///
-  ///     @Flag(inversion: .prefixedNo)
-  ///     var useHTTPS: Bool
-  ///
-  /// To customize the names of the two states further, define a
-  /// `CaseIterable` enumeration with a case for each state, and use that
-  /// as the type for your flag. In this case, the user can specify either
-  /// `--use-production-server` or `--use-development-server` to set the
-  /// flag's value.
-  ///
-  ///     enum ServerChoice {
-  ///         case useProductionServer
-  ///         case useDevelopmentServer
-  ///     }
-  ///
-  ///     @Flag var serverChoice: ServerChoice
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, one of the flags declared by this `@Flag` attribute is required
-  ///     from the user.
-  ///   - inversion: The method for converting this flag's name into an on/off
-  ///     pair.
-  ///   - exclusivity: The behavior to use when an on/off pair of flags is
-  ///     specified.
-  ///   - help: Information about how to use this flag.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: Bool = false`)")
-  public init(
-    name: NameSpecification = .long,
-    default initial: Bool?,
-    inversion: FlagInversion,
-    exclusivity: FlagExclusivity = .chooseLast,
-    help: ArgumentHelp? = nil
-  ) {
-    self.init(
-      name: name,
-      initial: initial,
-      inversion: inversion,
-      exclusivity: exclusivity,
-      help: help
-    )
   }
 
   /// Creates a Boolean property with default value provided by standard Swift default value syntax that reads its value from the presence of one or more inverted flags.
@@ -300,7 +287,7 @@ extension Flag where Value == Bool {
   ///
   /// - Parameters:
   ///   - name: A specification for what names are allowed for this flag.
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - inversion: The method for converting this flag's name into an on/off pair.
   ///   - exclusivity: The behavior to use when an on/off pair of flags is specified.
   ///   - help: Information about how to use this flag.
@@ -332,7 +319,7 @@ extension Flag where Value == Bool {
   ///
   /// - Parameters:
   ///   - name: A specification for what names are allowed for this flag.
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - inversion: The method for converting this flag's name into an on/off pair.
   ///   - exclusivity: The behavior to use when an on/off pair of flags is specified.
   ///   - help: Information about how to use this flag.
@@ -396,45 +383,12 @@ extension Flag where Value: EnumerableFlag {
         let name = Value.name(for: value)
         let helpForCase = hasCustomCaseHelp ? (caseHelps[i] ?? help) : help
         let help = ArgumentDefinition.Help(options: initial != nil ? .isOptional : [], help: helpForCase, defaultValue: defaultValue, key: key, isComposite: !hasCustomCaseHelp)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: initial, update: .nullary({ (origin, name, values) in
+        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .default, initialValue: initial, update: .nullary({ (origin, name, values) in
           hasUpdated = try ArgumentSet.updateFlag(key: key, value: value, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
         }))
       }
       return ArgumentSet(args)
       })
-  }
-
-  /// Creates a property that gets its value from the presence of a flag,
-  /// where the allowed flags are defined by an `EnumerableFlag` type.
-  ///
-  /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:exclusivity:help:)` for properties with a default value
-  /// - `init(exclusivity:help:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Flag(default: .baz)
-  /// -var foo: Bar
-  /// +@Flag var foo: Bar = baz
-  /// ```
-  ///
-  /// - Parameters:
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, one of the flags declared by this `@Flag` attribute is required
-  ///     from the user.
-  ///   - exclusivity: The behavior to use when multiple flags are specified.
-  ///   - help: Information about how to use this flag.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: Bar = .baz`)")
-  public init(
-    default initial: Value?,
-    exclusivity: FlagExclusivity = .exclusive,
-    help: ArgumentHelp? = nil
-  ) {
-    self.init(
-      initial: initial,
-      exclusivity: exclusivity,
-      help: help
-    )
   }
 
   /// Creates a property with a default value provided by standard Swift default value syntax that gets its value from the presence of a flag.
@@ -453,7 +407,7 @@ extension Flag where Value: EnumerableFlag {
   /// ```
   ///
   /// - Parameters:
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - exclusivity: The behavior to use when multiple flags are specified.
   ///   - help: Information about how to use this flag.
   public init(
@@ -518,7 +472,7 @@ extension Flag {
         let name = Element.name(for: value)
         let helpForCase = hasCustomCaseHelp ? (caseHelps[i] ?? help) : help
         let help = ArgumentDefinition.Help(options: .isOptional, help: helpForCase, key: key, isComposite: !hasCustomCaseHelp)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: nil as Element?, update: .nullary({ (origin, name, values) in
+        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .default, initialValue: nil as Element?, update: .nullary({ (origin, name, values) in
           hasUpdated = try ArgumentSet.updateFlag(key: key, value: value, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
         }))
 
@@ -543,7 +497,7 @@ extension Flag {
         let name = Element.name(for: value)
         let helpForCase = hasCustomCaseHelp ? (caseHelps[i] ?? help) : help
         let help = ArgumentDefinition.Help(options: .isOptional, help: helpForCase, key: key, isComposite: !hasCustomCaseHelp)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: initial, update: .nullary({ (origin, name, values) in
+        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .default, initialValue: initial, update: .nullary({ (origin, name, values) in
           values.update(forKey: key, inputOrigin: origin, initial: [Element](), closure: {
             $0.append(value)
           })
@@ -589,97 +543,6 @@ extension Flag {
       initial: nil,
       help: help
     )
-  }
-}
-
-// - MARK: Unavailable CaseIterable/RawValue == String
-
-extension Flag where Value: CaseIterable, Value: RawRepresentable, Value: Equatable, Value.RawValue == String {
-  /// Creates a property that gets its value from the presence of a flag,
-  /// where the allowed flags are defined by a case-iterable type.
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, this flag is required.
-  ///   - exclusivity: The behavior to use when multiple flags are specified.
-  ///   - help: Information about how to use this flag.
-  @available(*, unavailable, message: "Add 'EnumerableFlag' conformance to your value type and, if needed, specify the 'name' of each case there.")
-  public init(
-    name: NameSpecification = .long,
-    default initial: Value? = nil,
-    exclusivity: FlagExclusivity = .exclusive,
-    help: ArgumentHelp? = nil
-  ) {
-    self.init(_parsedValue: .init { key in
-      // This gets flipped to `true` the first time one of these flags is
-      // encountered.
-      var hasUpdated = false
-      let defaultValue = initial.map(String.init(describing:))
-
-      let args = Value.allCases.map { value -> ArgumentDefinition in
-        let caseKey = InputKey(rawValue: value.rawValue)
-        let help = ArgumentDefinition.Help(options: initial != nil ? .isOptional : [], help: help, defaultValue: defaultValue, key: key, isComposite: true)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: initial, update: .nullary({ (origin, name, values) in
-          hasUpdated = try ArgumentSet.updateFlag(key: key, value: value, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
-        }))
-      }
-      return ArgumentSet(args)
-      })
-  }
-}
-
-extension Flag {
-  /// Creates a property that gets its value from the presence of a flag,
-  /// where the allowed flags are defined by a case-iterable type.
-  @available(*, unavailable, message: "Add 'EnumerableFlag' conformance to your value type and, if needed, specify the 'name' of each case there.")
-  public init<Element>(
-    name: NameSpecification = .long,
-    exclusivity: FlagExclusivity = .exclusive,
-    help: ArgumentHelp? = nil
-  ) where Value == Element?, Element: CaseIterable, Element: Equatable, Element: RawRepresentable, Element.RawValue == String {
-    self.init(_parsedValue: .init { key in
-      // This gets flipped to `true` the first time one of these flags is
-      // encountered.
-      var hasUpdated = false
-      
-      let args = Element.allCases.map { value -> ArgumentDefinition in
-        let caseKey = InputKey(rawValue: value.rawValue)
-        let help = ArgumentDefinition.Help(options: .isOptional, help: help, key: key, isComposite: true)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: nil as Element?, update: .nullary({ (origin, name, values) in
-          hasUpdated = try ArgumentSet.updateFlag(key: key, value: value, origin: origin, values: &values, hasUpdated: hasUpdated, exclusivity: exclusivity)
-        }))
-      }
-      return ArgumentSet(args)
-    })
-  }
-  
-  /// Creates an array property that gets its values from the presence of
-  /// zero or more flags, where the allowed flags are defined by a
-  /// `CaseIterable` type.
-  ///
-  /// This property has an empty array as its default value.
-  ///
-  /// - Parameters:
-  ///   - name: A specification for what names are allowed for this flag.
-  ///   - help: Information about how to use this flag.
-  @available(*, unavailable, message: "Add 'EnumerableFlag' conformance to your value type and, if needed, specify the 'name' of each case there.")
-  public init<Element>(
-    name: NameSpecification = .long,
-    help: ArgumentHelp? = nil
-  ) where Value == Array<Element>, Element: CaseIterable, Element: RawRepresentable, Element.RawValue == String {
-    self.init(_parsedValue: .init { key in
-      let args = Element.allCases.map { value -> ArgumentDefinition in
-        let caseKey = InputKey(rawValue: value.rawValue)
-        let help = ArgumentDefinition.Help(options: .isOptional, help: help, key: key, isComposite: true)
-        return ArgumentDefinition.flag(name: name, key: key, caseKey: caseKey, help: help, parsingStrategy: .nextAsValue, initialValue: [Element](), update: .nullary({ (origin, name, values) in
-          values.update(forKey: key, inputOrigin: origin, initial: [Element](), closure: {
-            $0.append(value)
-          })
-        }))
-      }
-      return ArgumentSet(args)
-    })
   }
 }
 

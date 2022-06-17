@@ -22,8 +22,10 @@ extension UsageGenerator {
     self.init(toolName: toolName, definition: definition)
   }
   
-  init(toolName: String, parsable: ParsableArguments) {
-    self.init(toolName: toolName, definition: ArgumentSet(type(of: parsable)))
+  init(toolName: String, parsable: ParsableArguments, visibility: ArgumentVisibility) {
+    self.init(
+      toolName: toolName,
+      definition: ArgumentSet(type(of: parsable), visibility: visibility))
   }
   
   init(toolName: String, definition: [ArgumentSet]) {
@@ -36,101 +38,89 @@ extension UsageGenerator {
   ///
   /// In `roff`.
   var synopsis: String {
-    let definitionSynopsis = definition.synopsis
-    switch definitionSynopsis.count {
+    var options = Array(definition)
+    switch options.count {
     case 0:
       return toolName
     case let x where x > 12:
+      // When we have too many options, keep required and positional arguments,
+      // but discard the rest.
+      options = options.filter {
+        $0.isPositional || !$0.help.options.contains(.isOptional)
+      }
+      // If there are between 1 and 12 options left, print them, otherwise print
+      // a simplified usage string.
+      if !options.isEmpty, options.count <= 12 {
+        let synopsis = options
+          .map { $0.synopsis }
+          .joined(separator: " ")
+        return "\(toolName) [<options>] \(synopsis)"
+      }
       return "\(toolName) <options>"
     default:
-      return "\(toolName) \(definition.synopsis.joined(separator: " "))"
+      let synopsis = options
+        .map { $0.synopsis }
+        .joined(separator: " ")
+      return "\(toolName) \(synopsis)"
     }
-  }
-}
-
-extension ArgumentSet {
-  var synopsis: [String] {
-    return self
-      .compactMap { $0.synopsis }
   }
 }
 
 extension ArgumentDefinition {
-  var synopsisForHelp: String? {
-    guard help.help?.shouldDisplay != false else {
-      return nil
-    }
-    
+  var synopsisForHelp: String {
     switch kind {
     case .named:
-      let joinedSynopsisString = partitionedNames
+      let joinedSynopsisString = names
+        .partitioned
         .map { $0.synopsisString }
         .joined(separator: ", ")
-      
+
       switch update {
       case .unary:
-        return "\(joinedSynopsisString) <\(synopsisValueName ?? "")>"
+        return "\(joinedSynopsisString) <\(valueName)>"
       case .nullary:
         return joinedSynopsisString
       }
     case .positional:
       return "<\(valueName)>"
+    case .default:
+      return ""
     }
   }
-  
-  var unadornedSynopsis: String? {
+
+  var unadornedSynopsis: String {
     switch kind {
     case .named:
-      guard let name = preferredNameForSynopsis else { return nil }
-      
+      guard let name = names.preferredName else {
+        fatalError("preferredName cannot be nil for named arguments")
+      }
+
       switch update {
       case .unary:
-        return "\(name.synopsisString) <\(synopsisValueName ?? "value")>"
+        return "\(name.synopsisString) <\(valueName)>"
       case .nullary:
         return name.synopsisString
       }
     case .positional:
       return "<\(valueName)>"
+    case .default:
+      return ""
     }
   }
-  
-  var synopsis: String? {
-    guard help.help?.shouldDisplay != false else {
-      return nil
+
+  var synopsis: String {
+    var synopsis = unadornedSynopsis
+    if help.options.contains(.isRepeating) {
+      synopsis += " ..."
     }
-    
-    guard !help.options.contains(.isOptional) else {
-      var n = self
-      n.help.options.remove(.isOptional)
-      return n.synopsis.flatMap { "[\($0)]" }
+    if help.options.contains(.isOptional) {
+      synopsis = "[\(synopsis)]"
     }
-    guard !help.options.contains(.isRepeating) else {
-      var n = self
-      n.help.options.remove(.isRepeating)
-      return n.synopsis.flatMap { "\($0) ..." }
-    }
-    
-    return unadornedSynopsis
-  }
-  
-  var partitionedNames: [Name] {
-    return names.filter{ $0.isShort } + names.filter{ !$0.isShort }
-  }
-  
-  var preferredNameForSynopsis: Name? {
-    names.first{ !$0.isShort } ?? names.first
-  }
-  
-  var synopsisValueName: String? {
-    valueName
+    return synopsis
   }
 }
 
 extension ArgumentSet {
-  func helpMessage(for error: Swift.Error) -> String {
-    return errorDescription(error: error) ?? ""
-  }
-  
   /// Will generate a descriptive help message if possible.
   ///
   /// If no descriptive help message can be generated, `nil` will be returned.
@@ -148,6 +138,19 @@ extension ArgumentSet {
       return nil
     }
   }
+  
+  func helpDescription(error: Swift.Error) -> String? {
+    switch error {
+    case let parserError as ParserError:
+      return ErrorMessageGenerator(arguments: self, error: parserError)
+        .makeHelpMessage()
+    case let commandError as CommandError:
+      return ErrorMessageGenerator(arguments: self, error: commandError.parserError)
+        .makeHelpMessage()
+    default:
+      return nil
+    }
+  }
 }
 
 struct ErrorMessageGenerator {
@@ -158,7 +161,7 @@ struct ErrorMessageGenerator {
 extension ErrorMessageGenerator {
   func makeErrorMessage() -> String? {
     switch error {
-    case .helpRequested, .versionRequested, .completionScriptRequested, .completionScriptCustomResponse:
+    case .helpRequested, .versionRequested, .completionScriptRequested, .completionScriptCustomResponse, .dumpHelpRequested:
       return nil
 
     case .unsupportedShell(let shell?):
@@ -208,31 +211,37 @@ extension ErrorMessageGenerator {
       }
     }
   }
+  
+  func makeHelpMessage() -> String? {
+    switch error {
+    case .unableToParseValue(let o, let n, let v, forKey: let k, originalError: let e):
+      return unableToParseHelpMessage(origin: o, name: n, value: v, key: k, error: e)
+    case .missingValueForOption(_, let n):
+      return missingValueForOptionHelpMessage(name: n)
+    case .noValue(let k):
+      return noValueHelpMessage(key: k)
+    default:
+      return nil
+    }
+  }
 }
 
 extension ErrorMessageGenerator {
   func arguments(for key: InputKey) -> [ArgumentDefinition] {
-    return arguments
-      .filter {
-        $0.help.keys.contains(key)
-    }
+    arguments
+      .filter { $0.help.keys.contains(key) }
   }
   
   func help(for key: InputKey) -> ArgumentDefinition.Help? {
-    return arguments
+    arguments
       .first { $0.help.keys.contains(key) }
       .map { $0.help }
   }
   
   func valueName(for name: Name) -> String? {
-    for arg in arguments {
-      guard
-        arg.names.contains(name),
-        let v = arg.synopsisValueName
-        else { continue }
-      return v
-    }
-    return nil
+    arguments
+      .first { $0.names.contains(name) }
+      .map { $0.valueName }
   }
 }
 
@@ -284,7 +293,7 @@ extension ErrorMessageGenerator {
       })
     
     if let suggestion = suggestion {
-        return "Unknown option '\(name.synopsisString)'. Did you mean '\(suggestion.synopsisString)'?"
+      return "Unknown option '\(name.synopsisString)'. Did you mean '\(suggestion.synopsisString)'?"
     }
     return "Unknown option '\(name.synopsisString)'"
   }
@@ -334,12 +343,14 @@ extension ErrorMessageGenerator {
   
   func noValueMessage(key: InputKey) -> String? {
     let args = arguments(for: key)
-    let possibilities = args.compactMap {
-      $0.nonOptional.synopsis
+    let possibilities: [String] = args.compactMap {
+      $0.help.visibility.base == .default
+        ? $0.nonOptional.synopsis
+        : nil
     }
     switch possibilities.count {
     case 0:
-      return "Missing expected argument"
+      return "No value set for non-argument var \(key). Replace with a static variable, or let constant."
     case 1:
       return "Missing expected argument '\(possibilities.first!)'"
     default:
@@ -348,11 +359,46 @@ extension ErrorMessageGenerator {
     }
   }
   
-  func unableToParseValueMessage(origin: InputOrigin, name: Name?, value: String, key: InputKey, error: Error?) -> String {
+  func unableToParseHelpMessage(origin: InputOrigin, name: Name?, value: String, key: InputKey, error: Error?) -> String {
+    guard let abstract = help(for: key)?.abstract else { return "" }
+    
     let valueName = arguments(for: key).first?.valueName
     
+    switch (name, valueName) {
+    case let (n?, v?):
+      return "\(n.synopsisString) <\(v)>  \(abstract)"
+    case let (_, v?):
+      return "<\(v)>  \(abstract)"
+    case (_, _):
+      return ""
+    }
+  }
+
+  func missingValueForOptionHelpMessage(name: Name) -> String {
+    guard let arg = arguments.first(where: { $0.names.contains(name) }) else {
+      return ""
+    }
+
+    let help = arg.help.abstract
+    return "\(name.synopsisString) <\(arg.valueName)>  \(help)"
+  }
+
+  func noValueHelpMessage(key: InputKey) -> String {
+    guard let abstract = help(for: key)?.abstract else { return "" }
+    guard let arg = arguments(for: key).first else { return "" }
+
+    if let synopsisString = arg.names.first?.synopsisString {
+      return "\(synopsisString) <\(arg.valueName)>  \(abstract)"
+    }
+    return "<\(arg.valueName)>  \(abstract)"
+  }
+  
+  func unableToParseValueMessage(origin: InputOrigin, name: Name?, value: String, key: InputKey, error: Error?) -> String {
+    let argumentValue = arguments(for: key).first
+    let valueName = argumentValue?.valueName
+
     // We want to make the "best effort" in producing a custom error message.
-    // We favour `LocalizedError.errorDescription` and fall back to
+    // We favor `LocalizedError.errorDescription` and fall back to
     // `CustomStringConvertible`. To opt in, return your custom error message
     // as the `description` property of `CustomStringConvertible`.
     let customErrorMessage: String = {
@@ -362,10 +408,10 @@ extension ErrorMessageGenerator {
       case let err?:
         return ": " + String(describing: err)
       default:
-        return ""
+        return argumentValue?.formattedValueList ?? ""
       }
     }()
-    
+
     switch (name, valueName) {
     case let (n?, v?):
       return "The value '\(value)' is invalid for '\(n.synopsisString) <\(v)>'\(customErrorMessage)"
@@ -375,6 +421,28 @@ extension ErrorMessageGenerator {
       return "The value '\(value)' is invalid for '\(n.synopsisString)'\(customErrorMessage)"
     case (nil, nil):
       return "The value '\(value)' is invalid.\(customErrorMessage)"
+    }
+  }
+}
+
+private extension ArgumentDefinition {
+  var formattedValueList: String {
+    if help.allValues.isEmpty {
+      return ""
+    }
+
+    if help.allValues.count < 6 {
+      let quotedValues = help.allValues.map { "'\($0)'" }
+      let validList: String
+      if quotedValues.count <= 2 {
+        validList = quotedValues.joined(separator: " and ")
+      } else {
+        validList = quotedValues.dropLast().joined(separator: ", ") + " or \(quotedValues.last!)"
+      }
+      return ". Please provide one of \(validList)."
+    } else {
+      let bulletValueList = help.allValues.map { "  - \($0)" }.joined(separator: "\n")
+      return ". Please provide one of the following:\n\(bulletValueList)"
     }
   }
 }

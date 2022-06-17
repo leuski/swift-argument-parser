@@ -25,7 +25,7 @@ extension URL: ExpressibleByArgument {
   }
 
   public var defaultValueDescription: String {
-    self.absoluteString == FileManager.default.currentDirectoryPath
+    self.path == FileManager.default.currentDirectoryPath && self.isFileURL
       ? "current directory"
       : String(describing: self)
   }
@@ -40,7 +40,7 @@ extension HelpGenerationTests {
   }
 
   func testHelp() {
-    AssertHelp(for: A.self, equals: """
+    AssertHelp(.default, for: A.self, equals: """
             USAGE: a --name <name> [--title <title>]
 
             OPTIONS:
@@ -58,15 +58,33 @@ extension HelpGenerationTests {
     @Argument(help: .hidden) var hiddenName: String?
     @Option(help: .hidden) var hiddenTitle: String?
     @Flag(help: .hidden) var hiddenFlag: Bool = false
+    @Flag(inversion: .prefixedNo, help: .hidden) var hiddenInvertedFlag: Bool = true
   }
 
   func testHelpWithHidden() {
-    AssertHelp(for: B.self, equals: """
+    AssertHelp(.default, for: B.self, equals: """
             USAGE: b --name <name> [--title <title>]
 
             OPTIONS:
               --name <name>           Your name
               --title <title>         Your title
+              -h, --help              Show help information.
+
+            """)
+
+    AssertHelp(.hidden, for: B.self, equals: """
+            USAGE: b --name <name> [--title <title>] [<hidden-name>] [--hidden-title <hidden-title>] [--hidden-flag] [--hidden-inverted-flag] [--no-hidden-inverted-flag]
+
+            ARGUMENTS:
+              <hidden-name>
+
+            OPTIONS:
+              --name <name>           Your name
+              --title <title>         Your title
+              --hidden-title <hidden-title>
+              --hidden-flag
+              --hidden-inverted-flag/--no-hidden-inverted-flag
+                                      (default: true)
               -h, --help              Show help information.
 
             """)
@@ -79,7 +97,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithDiscussion() {
-    AssertHelp(for: C.self, equals: """
+    AssertHelp(.default, for: C.self, equals: """
             USAGE: c --name <name>
 
             OPTIONS:
@@ -102,7 +120,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithDefaultValueButNoDiscussion() {
-    AssertHelp(for: Issue27.self, equals: """
+    AssertHelp(.default, for: Issue27.self, equals: """
             USAGE: issue27 [--two <two>] --three <three> [--four <four>] [--five <five>]
 
             OPTIONS:
@@ -139,9 +157,6 @@ extension HelpGenerationTests {
     @Option(help: "Your name.")
     var name: String = "John"
 
-    @Option(default: "Winston", help: "Your middle name.")
-    var middleName: String?
-
     @Option(help: "Your age.")
     var age: Int = 20
 
@@ -158,20 +173,18 @@ extension HelpGenerationTests {
     var degree: Degree = .bachelor
 
     @Option(help: "Directory.")
-    var directory: URL = URL(string: FileManager.default.currentDirectoryPath)!
+    var directory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
   }
 
   func testHelpWithDefaultValues() {
-    AssertHelp(for: D.self, equals: """
-            USAGE: d [<occupation>] [--name <name>] [--middle-name <middle-name>] [--age <age>] [--logging <logging>] [--lucky <numbers> ...] [--optional] [--required] [--degree <degree>] [--directory <directory>]
+    AssertHelp(.default, for: D.self, equals: """
+            USAGE: d [<occupation>] [--name <name>] [--age <age>] [--logging <logging>] [--lucky <numbers> ...] [--optional] [--required] [--degree <degree>] [--directory <directory>]
 
             ARGUMENTS:
               <occupation>            Your occupation. (default: --)
 
             OPTIONS:
               --name <name>           Your name. (default: John)
-              --middle-name <middle-name>
-                                      Your middle name. (default: Winston)
               --age <age>             Your age. (default: 20)
               --logging <logging>     Whether logging is enabled. (default: false)
               --lucky <numbers>       Your lucky numbers. (default: 7, 14)
@@ -215,7 +228,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithMutuallyExclusiveFlags() {
-    AssertHelp(for: E.self, equals: """
+    AssertHelp(.default, for: E.self, equals: """
                USAGE: e --stats --count --list
 
                OPTIONS:
@@ -225,7 +238,7 @@ extension HelpGenerationTests {
 
                """)
 
-    AssertHelp(for: F.self, equals: """
+    AssertHelp(.default, for: F.self, equals: """
                USAGE: f [-s] [-c] [-l]
 
                OPTIONS:
@@ -234,7 +247,7 @@ extension HelpGenerationTests {
 
                """)
 
-    AssertHelp(for: G.self, equals: """
+    AssertHelp(.default, for: G.self, equals: """
                USAGE: g [--flag] [--no-flag]
 
                OPTIONS:
@@ -272,7 +285,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithSubcommands() {
-    AssertHelp(for: H.self, equals: """
+    AssertHelp(.default, for: H.self, equals: """
     USAGE: h <subcommand>
 
     OPTIONS:
@@ -288,7 +301,7 @@ extension HelpGenerationTests {
       See 'h help <subcommand>' for detailed help.
     """)
 
-    AssertHelp(for: H.AnotherCommand.self, root: H.self, equals: """
+    AssertHelp(.default, for: H.AnotherCommand.self, root: H.self, equals: """
     USAGE: h another-command [--some-option-with-very-long-name <some-option-with-very-long-name>] [--option <option>] [<argument-with-very-long-name-and-help>] [<argument-with-very-long-name>] [<argument>]
 
     ARGUMENTS:
@@ -310,7 +323,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithVersion() {
-    AssertHelp(for: I.self, equals: """
+    AssertHelp(.default, for: I.self, equals: """
     USAGE: i
 
     OPTIONS:
@@ -326,7 +339,8 @@ extension HelpGenerationTests {
   }
 
   func testOverviewButNoAbstractSpacing() {
-    let renderedHelp = HelpGenerator(J.self).rendered()
+    let renderedHelp = HelpGenerator(J.self, visibility: .default)
+      .rendered()
     AssertEqualStringsIgnoringTrailingWhitespace(renderedHelp, """
     OVERVIEW:
     test
@@ -351,7 +365,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithNoValueForArray() {
-    AssertHelp(for: K.self, equals: """
+    AssertHelp(.default, for: K.self, equals: """
     USAGE: k [<paths> ...]
 
     ARGUMENTS:
@@ -371,7 +385,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithMultipleCustomNames() {
-    AssertHelp(for: L.self, equals: """
+    AssertHelp(.default, for: L.self, equals: """
     USAGE: l [--remote <remote>]
 
     OPTIONS:
@@ -389,7 +403,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithDefaultCommand() {
-    AssertHelp(for: N.self, equals: """
+    AssertHelp(.default, for: N.self, equals: """
     USAGE: n <subcommand>
 
     OPTIONS:
@@ -423,7 +437,7 @@ extension HelpGenerationTests {
   }
 
   func testHelpWithDefaultValueForArray() {
-    AssertHelp(for: P.self, equals: """
+    AssertHelp(.default, for: P.self, equals: """
     USAGE: p [-o <o> ...] [<remainder> ...]
 
     ARGUMENTS:
@@ -434,5 +448,331 @@ extension HelpGenerationTests {
       -h, --help              Show help information.
 
     """)
+  }
+    
+  struct Foo: ParsableCommand {
+    public static var configuration = CommandConfiguration(
+      commandName: "foo",
+      abstract: "Perform some foo",
+      subcommands: [
+        Bar.self
+      ],
+      helpNames: [.short, .long, .customLong("help", withSingleDash: true)])
+        
+    @Option(help: "Name for foo")
+    var fooName: String?
+        
+    public init() {}
+  }
+
+  struct Bar: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "bar",
+      _superCommandName: "foo",
+      abstract: "Perform bar operations",
+      helpNames: [.short, .long, .customLong("help", withSingleDash: true)])
+            
+    @Option(help: "Bar Strength")
+    var barStrength: String?
+        
+    public init() {}
+  }
+
+  func testHelpExcludingSuperCommand() throws {
+    AssertHelp(.default, for: Bar.self, root: Foo.self, equals: """
+    OVERVIEW: Perform bar operations
+
+    USAGE: foo bar [--bar-strength <bar-strength>]
+
+    OPTIONS:
+      --bar-strength <bar-strength>
+                              Bar Strength
+      -h, -help, --help       Show help information.
+    
+    """)
+  }
+}
+
+extension HelpGenerationTests {
+  private struct optionsToHide: ParsableArguments {
+    @Flag(help: "Verbose")
+    var verbose: Bool = false
+    
+    @Option(help: "Custom Name")
+    var customName: String?
+    
+    @Option(help: .hidden)
+    var hiddenOption: String?
+    
+    @Argument(help: .private)
+    var privateArg: String?
+  }
+
+  @available(*, deprecated)
+  private struct HideOptionGroupLegacyDriver: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "driver", abstract: "Demo hiding option groups")
+    
+    @OptionGroup(_hiddenFromHelp: true)
+    var hideMe: optionsToHide
+    
+    @Option(help: "Time to wait before timeout (in seconds)")
+    var timeout: Int?
+  }
+
+  private struct HideOptionGroupDriver: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "driver", abstract: "Demo hiding option groups")
+
+    @OptionGroup(visibility: .hidden)
+    var hideMe: optionsToHide
+
+    @Option(help: "Time to wait before timeout (in seconds)")
+    var timeout: Int?
+  }
+
+  private struct PrivateOptionGroupDriver: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "driver", abstract: "Demo hiding option groups")
+
+    @OptionGroup(visibility: .private)
+    var hideMe: optionsToHide
+
+    @Option(help: "Time to wait before timeout (in seconds)")
+    var timeout: Int?
+  }
+
+  private var helpMessage: String { """
+    OVERVIEW: Demo hiding option groups
+
+    USAGE: driver [--timeout <timeout>]
+
+    OPTIONS:
+      --timeout <timeout>     Time to wait before timeout (in seconds)
+      -h, --help              Show help information.
+
+    """
+  }
+
+  private var helpHiddenMessage: String { """
+    OVERVIEW: Demo hiding option groups
+
+    USAGE: driver [--verbose] [--custom-name <custom-name>] [--hidden-option <hidden-option>] [--timeout <timeout>]
+
+    OPTIONS:
+      --verbose               Verbose
+      --custom-name <custom-name>
+                              Custom Name
+      --hidden-option <hidden-option>
+      --timeout <timeout>     Time to wait before timeout (in seconds)
+      -h, --help              Show help information.
+
+    """
+  }
+
+  @available(*, deprecated)
+  func testHidingOptionGroup() throws {
+    AssertHelp(.default, for: HideOptionGroupLegacyDriver.self, equals: helpMessage)
+    AssertHelp(.default, for: HideOptionGroupDriver.self, equals: helpMessage)
+    AssertHelp(.default, for: PrivateOptionGroupDriver.self, equals: helpMessage)
+  }
+
+  @available(*, deprecated)
+  func testHelpHiddenShowsDefaultAndHidden() throws {
+    AssertHelp(.hidden, for: HideOptionGroupLegacyDriver.self, equals: helpHiddenMessage)
+    AssertHelp(.hidden, for: HideOptionGroupDriver.self, equals: helpHiddenMessage)
+    
+    // Note: Private option groups are not visible at `.hidden` help level.
+    AssertHelp(.hidden, for: PrivateOptionGroupDriver.self, equals: helpMessage)
+  }
+}
+
+extension HelpGenerationTests {
+  struct AllValues: ParsableCommand {
+    enum Manual: Int, ExpressibleByArgument {
+      case foo
+      static var allValueStrings = ["bar"]
+    }
+
+    enum UnspecializedSynthesized: Int, CaseIterable, ExpressibleByArgument {
+      case one, two
+    }
+
+    enum SpecializedSynthesized: String, CaseIterable, ExpressibleByArgument {
+      case apple = "Apple", banana = "Banana"
+    }
+
+    @Argument var manualArgument: Manual
+    @Option var manualOption: Manual
+
+    @Argument var unspecializedSynthesizedArgument: UnspecializedSynthesized
+    @Option var unspecializedSynthesizedOption: UnspecializedSynthesized
+
+    @Argument var specializedSynthesizedArgument: SpecializedSynthesized
+    @Option var specializedSynthesizedOption: SpecializedSynthesized
+  }
+
+  func testAllValueStrings() throws {
+    XCTAssertEqual(AllValues.Manual.allValueStrings, ["bar"])
+    XCTAssertEqual(AllValues.UnspecializedSynthesized.allValueStrings, ["one", "two"])
+    XCTAssertEqual(AllValues.SpecializedSynthesized.allValueStrings, ["Apple", "Banana"])
+  }
+
+  func testAllValues() {
+    let opts = ArgumentSet(AllValues.self, visibility: .private)
+    XCTAssertEqual(AllValues.Manual.allValueStrings, opts[0].help.allValues)
+    XCTAssertEqual(AllValues.Manual.allValueStrings, opts[1].help.allValues)
+
+    XCTAssertEqual(AllValues.UnspecializedSynthesized.allValueStrings, opts[2].help.allValues)
+    XCTAssertEqual(AllValues.UnspecializedSynthesized.allValueStrings, opts[3].help.allValues)
+
+    XCTAssertEqual(AllValues.SpecializedSynthesized.allValueStrings, opts[4].help.allValues)
+    XCTAssertEqual(AllValues.SpecializedSynthesized.allValueStrings, opts[5].help.allValues)
+  }
+
+  struct Q: ParsableArguments {
+    @Option(help: "Your name") var name: String
+    @Option(help: "Your title") var title: String?
+
+    @Argument(help: .private) var privateName: String?
+    @Option(help: .private) var privateTitle: String?
+    @Flag(help: .private) var privateFlag: Bool = false
+    @Flag(inversion: .prefixedNo, help: .private) var privateInvertedFlag: Bool = true
+  }
+
+  func testHelpWithPrivate() {
+    AssertHelp(.default, for: Q.self, equals: """
+            USAGE: q --name <name> [--title <title>]
+
+            OPTIONS:
+              --name <name>           Your name
+              --title <title>         Your title
+              -h, --help              Show help information.
+
+            """)
+  }
+}
+
+// MARK: - Issue #278 https://github.com/apple/swift-argument-parser/issues/278
+
+extension HelpGenerationTests {
+  private struct ParserBug: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "parserBug",
+      subcommands: [Sub.self])
+    
+    struct CommonOptions: ParsableCommand {
+      @Flag(help: "example flag")
+      var example: Bool = false
+    }
+
+    struct Sub: ParsableCommand {
+      @OptionGroup()
+      var commonOptions: CommonOptions
+      
+      @Argument(help: "Non-mandatory argument")
+      var argument: String?
+    }
+  }
+  
+  func testIssue278() {
+    AssertHelp(.default, for: ParserBug.Sub.self, root: ParserBug.self, equals: """
+      USAGE: parserBug sub [--example] [<argument>]
+
+      ARGUMENTS:
+        <argument>              Non-mandatory argument
+
+      OPTIONS:
+        --example               example flag
+        -h, --help              Show help information.
+
+      """)
+  }
+
+  struct CustomUsageShort: ParsableCommand {
+    static var configuration: CommandConfiguration {
+      CommandConfiguration(usage: """
+        example [--verbose] <file-name>
+        """)
+    }
+    
+    @Argument var file: String
+    @Flag var verboseMode = false
+  }
+  
+  struct CustomUsageLong: ParsableCommand {
+    static var configuration: CommandConfiguration {
+      CommandConfiguration(usage: """
+        example <file-name>
+        example --verbose <file-name>
+        example --help
+        """)
+    }
+    
+    @Argument var file: String
+    @Flag var verboseMode = false
+  }
+
+  struct CustomUsageHidden: ParsableCommand {
+    static var configuration: CommandConfiguration {
+      CommandConfiguration(usage: "")
+    }
+    
+    @Argument var file: String
+    @Flag var verboseMode = false
+  }
+
+  func testCustomUsageHelp() {
+    XCTAssertEqual(CustomUsageShort.helpMessage(columns: 80), """
+      USAGE: example [--verbose] <file-name>
+
+      ARGUMENTS:
+        <file>
+
+      OPTIONS:
+        --verbose-mode
+        -h, --help              Show help information.
+      
+      """)
+    
+    XCTAssertEqual(CustomUsageLong.helpMessage(columns: 80), """
+      USAGE: example <file-name>
+             example --verbose <file-name>
+             example --help
+
+      ARGUMENTS:
+        <file>
+
+      OPTIONS:
+        --verbose-mode
+        -h, --help              Show help information.
+      
+      """)
+    
+    XCTAssertEqual(CustomUsageHidden.helpMessage(columns: 80), """
+      ARGUMENTS:
+        <file>
+
+      OPTIONS:
+        --verbose-mode
+        -h, --help              Show help information.
+      
+      """)
+  }
+  
+  func testCustomUsageError() {
+    XCTAssertEqual(CustomUsageShort.fullMessage(for: ValidationError("Test")), """
+      Error: Test
+      Usage: example [--verbose] <file-name>
+        See 'custom-usage-short --help' for more information.
+      """)
+    XCTAssertEqual(CustomUsageLong.fullMessage(for: ValidationError("Test")), """
+      Error: Test
+      Usage: example <file-name>
+             example --verbose <file-name>
+             example --help
+        See 'custom-usage-long --help' for more information.
+      """)
+    XCTAssertEqual(CustomUsageHidden.fullMessage(for: ValidationError("Test")), """
+      Error: Test
+        See 'custom-usage-hidden --help' for more information.
+      """)
   }
 }

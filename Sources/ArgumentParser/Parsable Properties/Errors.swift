@@ -15,6 +15,8 @@ import Glibc
 import Darwin
 #elseif canImport(CRT)
 import CRT
+#elseif canImport(WASILibc)
+import WASILibc
 #endif
 
 #if os(Windows)
@@ -41,7 +43,7 @@ public struct ValidationError: Error, CustomStringConvertible {
 
 /// An error type that only includes an exit code.
 ///
-/// If you're printing custom errors messages yourself, you can throw this error
+/// If you're printing custom error messages yourself, you can throw this error
 /// to specify the exit code without adding any additional output to standard
 /// out or standard error.
 public struct ExitCode: Error, RawRepresentable, Hashable {
@@ -66,6 +68,8 @@ public struct ExitCode: Error, RawRepresentable, Hashable {
   /// An exit code that indicates that the user provided invalid input.
 #if os(Windows)
   public static let validationFailure = ExitCode(ERROR_BAD_ARGUMENTS)
+#elseif os(WASI)
+  public static let validationFailure = ExitCode(EXIT_FAILURE)
 #else
   public static let validationFailure = ExitCode(EX_USAGE)
 #endif
@@ -82,7 +86,15 @@ public struct ExitCode: Error, RawRepresentable, Hashable {
 ///
 /// Throwing a `CleanExit` instance from a `validate` or `run` method, or
 /// passing it to `exit(with:)`, exits the program with exit code `0`.
-public enum CleanExit: Error, CustomStringConvertible {
+public struct CleanExit: Error, CustomStringConvertible {
+  internal enum Representation {
+    case helpRequest(ParsableCommand.Type? = nil)
+    case message(String)
+    case dumpRequest(ParsableCommand.Type? = nil)
+  }
+  
+  internal var base: Representation
+  
   /// Treat this error as a help request and display the full help message.
   ///
   /// You can use this case to simulate the user specifying one of the help
@@ -90,16 +102,13 @@ public enum CleanExit: Error, CustomStringConvertible {
   ///
   /// - Parameter command: The command type to offer help for, if different
   ///   from the root command.
-  case helpRequest(ParsableCommand.Type? = nil)
+  public static func helpRequest(_ type: ParsableCommand.Type? = nil) -> CleanExit {
+    self.init(base: .helpRequest(type))
+  }
   
   /// Treat this error as a clean exit with the given message.
-  case message(String)
-  
-  public var description: String {
-    switch self {
-    case .helpRequest: return "--help"
-    case .message(let message): return message
-    }
+  public static func message(_ text: String) -> CleanExit {
+    self.init(base: .message(text))
   }
   
   /// Treat this error as a help request and display the full help message.
@@ -111,5 +120,13 @@ public enum CleanExit: Error, CustomStringConvertible {
   ///   the root command.
   public static func helpRequest(_ command: ParsableCommand) -> CleanExit {
     return .helpRequest(type(of: command))
+  }
+  
+  public var description: String {
+    switch self.base {
+    case .helpRequest: return "--help"
+    case .message(let message): return message
+    case .dumpRequest: return "--experimental-dump-help"
+    }
   }
 }

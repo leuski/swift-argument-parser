@@ -17,7 +17,7 @@ struct ZshCompletionsGenerator {
     return """
     #compdef \(type._commandName)
     local context state state_descr line
-    _\(type._commandName)_commandname=$words[1]
+    _\(type._commandName.zshEscapingCommandName())_commandname=$words[1]
     typeset -A opt_args
 
     \(generateCompletionFunction([type]))
@@ -35,10 +35,9 @@ struct ZshCompletionsGenerator {
     let functionName = commands.completionFunctionName()
     let isRootCommand = commands.count == 1
     
-    var args = generateCompletionArguments(commands)
-    args.append("'(-h --help)'{-h,--help}'[Print help information.]'")
-    
+    var args = generateCompletionArguments(commands)    
     var subcommands = type.configuration.subcommands
+      .filter { $0.configuration.shouldDisplay }
     var subcommandHandler = ""
     if !subcommands.isEmpty {
       args.append("'(-): :->command'")
@@ -105,7 +104,8 @@ struct ZshCompletionsGenerator {
   }
 
   static func generateCompletionArguments(_ commands: [ParsableCommand.Type]) -> [String] {
-    ArgumentSet(commands.last!)
+    commands
+      .argumentsForHelp(visibility: .default)
       .compactMap { $0.zshCompletionString(commands) }
   }
 }
@@ -122,18 +122,21 @@ extension String {
   fileprivate func zshEscaped() -> String {
     self.zshEscapingSingleQuotes().zshEscapingMetacharacters()
   }
+  
+  fileprivate func zshEscapingCommandName() -> String {
+    self.replacingOccurrences(of: "-", with: "_")
+  }
 }
 
 extension ArgumentDefinition {
   var zshCompletionAbstract: String {
-    guard
-        let abstract = help.help?.abstract,
-        !abstract.isEmpty
-        else { return "" }
-    return "[\(abstract.zshEscaped())]"
+    guard !help.abstract.isEmpty else { return "" }
+    return "[\(help.abstract.zshEscaped())]"
   }
   
   func zshCompletionString(_ commands: [ParsableCommand.Type]) -> String? {
+    guard help.visibility.base == .default else { return nil }
+    
     var inputs: String
     switch update {
     case .unary:
@@ -185,7 +188,7 @@ extension ArgumentDefinition {
 
     case .custom:
       // Generate a call back into the command to retrieve a completions list
-      let commandName = commands.first!._commandName
+      let commandName = commands.first!._commandName.zshEscapingCommandName()
       return "{_custom_completion $_\(commandName)_commandname \(customCompletionCall(commands)) $words}"
     }
   }

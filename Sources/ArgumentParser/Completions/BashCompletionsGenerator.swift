@@ -35,6 +35,7 @@ struct BashCompletionsGenerator {
   
     // Include 'help' in the list of subcommands for the root command.
     var subcommands = type.configuration.subcommands
+      .filter { $0.configuration.shouldDisplay }
     if !subcommands.isEmpty && isRootCommand {
       subcommands.append(HelpCommand.self)
     }
@@ -44,8 +45,6 @@ struct BashCompletionsGenerator {
     // as all the subcommand names.
     let completionWords = generateArgumentWords(commands)
       + subcommands.map { $0._commandName }
-      // FIXME: These shouldn't be hard-coded, since they're overridable
-      + ["-h", "--help"]
     
     // Generate additional top-level completions — these are completion lists
     // or custom function-based word lists from positional arguments.
@@ -124,7 +123,8 @@ struct BashCompletionsGenerator {
 
   /// Returns the option and flag names that can be top-level completions.
   fileprivate static func generateArgumentWords(_ commands: [ParsableCommand.Type]) -> [String] {
-    ArgumentSet(commands.last!)
+    commands
+      .argumentsForHelp(visibility: .default)
       .flatMap { $0.bashCompletionWords() }
   }
 
@@ -132,7 +132,7 @@ struct BashCompletionsGenerator {
   ///
   /// These consist of completions that are defined as `.list` or `.custom`.
   fileprivate static func generateArgumentCompletions(_ commands: [ParsableCommand.Type]) -> [String] {
-    ArgumentSet(commands.last!)
+    ArgumentSet(commands.last!, visibility: .default)
       .compactMap { arg -> String? in
         guard arg.isPositional else { return nil }
 
@@ -145,14 +145,13 @@ struct BashCompletionsGenerator {
           return "$(\(command))"
         case .custom:
           // Generate a call back into the command to retrieve a completions list
-          let commandName = commands.first!._commandName
           let subcommandNames = commands.dropFirst().map { $0._commandName }.joined(separator: " ")
           // TODO: Make this work for @Arguments
-          let argumentName = arg.preferredNameForSynopsis?.synopsisString
+          let argumentName = arg.names.preferredName?.synopsisString
                 ?? arg.help.keys.first?.rawValue ?? "---"
           
           return """
-            $(\(commandName) ---completion \(subcommandNames) -- \(argumentName) "$COMP_WORDS")
+            $("${COMP_WORDS[0]}" ---completion \(subcommandNames) -- \(argumentName) "${COMP_WORDS[@]}")
             """
         }
       }
@@ -160,7 +159,7 @@ struct BashCompletionsGenerator {
 
   /// Returns the case-matching statements for supplying completions after an option or flag.
   fileprivate static func generateOptionHandlers(_ commands: [ParsableCommand.Type]) -> String {
-    ArgumentSet(commands.last!)
+    ArgumentSet(commands.last!, visibility: .default)
       .compactMap { arg -> String? in
         let words = arg.bashCompletionWords()
         if words.isEmpty { return nil }
@@ -182,7 +181,9 @@ struct BashCompletionsGenerator {
 extension ArgumentDefinition {
   /// Returns the different completion names for this argument.
   fileprivate func bashCompletionWords() -> [String] {
-    names.map { $0.synopsisString }
+    return help.visibility.base == .default
+      ? names.map { $0.synopsisString }
+      : []
   }
 
   /// Returns the bash completions that can follow this argument's `--name`.
@@ -207,8 +208,7 @@ extension ArgumentDefinition {
         
     case .custom:
       // Generate a call back into the command to retrieve a completions list
-      let commandName = commands.first!._commandName      
-      return #"COMPREPLY=( $(compgen -W "$(\#(commandName) \#(customCompletionCall(commands)) "$COMP_WORDS")" -- "$cur") )"#
+      return #"COMPREPLY=( $(compgen -W "$("${COMP_WORDS[0]}" \#(customCompletionCall(commands)) "${COMP_WORDS[@]}")" -- "$cur") )"#
     }
   }
 }

@@ -9,25 +9,42 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// A wrapper that represents a positional command-line argument.
+/// A property wrapper that represents a positional command-line argument.
 ///
-/// Positional arguments are specified without a label and must appear in
-/// the command-line arguments in declaration order.
+/// Use the `@Argument` wrapper to define a property of your custom command as
+/// a positional argument. A *positional argument* for a command-line tool is
+/// specified without a label and must appear in declaration order. `@Argument`
+/// properties with `Optional` type or a default value are optional for the user
+/// of your command-line tool.
 ///
-///     struct Options: ParsableArguments {
+/// For example, the following program has two positional arguments. The `name`
+/// argument is required, while `greeting` is optional because it has a default
+/// value.
+///
+///     @main
+///     struct Greet: ParsableCommand {
 ///         @Argument var name: String
-///         @Argument var greeting: String?
+///         @Argument var greeting: String = "Hello"
+///
+///         mutating func run() {
+///             print("\(greeting) \(name)!")
+///         }
 ///     }
 ///
-/// This program has two positional arguments; `name` is required, while
-/// `greeting` is optional. It can be evoked as either `command Joseph Hello`
-/// or simply `command Joseph`.
+/// You can call this program with just a name or with a name and a
+/// greeting. When you supply both arguments, the first argument is always
+/// treated as the name, due to the order of the property declarations.
+///
+///     $ greet Nadia
+///     Hello Nadia!
+///     $ greet Tamara Hi
+///     Hi Tamara!
 @propertyWrapper
 public struct Argument<Value>:
   Decodable, ParsedWrapper
 {
   internal var _parsedValue: Parsed<Value>
-  
+
   internal init(_parsedValue: Parsed<Value>) {
     self._parsedValue = _parsedValue
   }
@@ -95,35 +112,6 @@ extension Argument where Value: ExpressibleByArgument {
       })
   }
 
-  /// Creates a property that reads its value from an argument.
-  ///
-  /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:help:)` for properties with a default value
-  /// - `init(help:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Argument(default: "bar")
-  /// -var foo: String
-  /// +@Argument var foo: String = "bar"
-  /// ```
-  ///
-  /// - Parameters:
-  ///   - initial: A default value to use for this property. If `initial` is
-  ///     `nil`, the user must supply a value for this argument.
-  ///   - help: Information about how to use this argument.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: String = \"bar\"`)")
-  public init(
-    default initial: Value?,
-    help: ArgumentHelp? = nil
-  ) {
-    self.init(
-      initial: initial,
-      help: help,
-      completion: nil
-    )
-  }
-
   /// Creates a property with a default value provided by standard Swift default value syntax.
   ///
   /// This method is called to initialize an `Argument` with a default value such as:
@@ -132,7 +120,7 @@ extension Argument where Value: ExpressibleByArgument {
   /// ```
   ///
   /// - Parameters:
-  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during propery wrapper initialization.
+  ///   - wrappedValue: A default value to use for this property, provided implicitly by the compiler during property wrapper initialization.
   ///   - help: Information about how to use this argument.
   public init(
     wrappedValue: Value,
@@ -167,11 +155,13 @@ extension Argument where Value: ExpressibleByArgument {
   }
 }
 
-/// The strategy to use when parsing multiple values from `@Option` arguments
+/// The strategy to use when parsing multiple values from positional arguments
 /// into an array.
-public enum ArgumentArrayParsingStrategy {
+public struct ArgumentArrayParsingStrategy: Hashable {
+  internal var base: ArgumentDefinition.ParsingStrategy
+  
   /// Parse only unprefixed values from the command-line input, ignoring
-  /// any inputs that have a dash prefix.
+  /// any inputs that have a dash prefix. This is the default strategy.
   ///
   /// For example, for a parsable type defined as following:
   ///
@@ -185,29 +175,39 @@ public enum ArgumentArrayParsingStrategy {
   /// `one two --other` would result in an unknown option error for `--other`.
   ///
   /// This is the default strategy for parsing argument arrays.
-  case remaining
+  public static var remaining: ArgumentArrayParsingStrategy {
+    self.init(base: .default)
+  }
   
   /// Parse all remaining inputs after parsing any known options or flags,
   /// including dash-prefixed inputs and the `--` terminator.
   ///
-  /// For example, for a parsable type defined as following:
+  /// When you use the `unconditionalRemaining` parsing strategy, the parser
+  /// stops parsing flags and options as soon as it encounters a positional
+  /// argument or an unrecognized flag. For example, for a parsable type
+  /// defined as following:
   ///
   ///     struct Options: ParsableArguments {
-  ///         @Flag var verbose: Bool
-  ///         @Argument(parsing: .unconditionalRemaining) var words: [String]
+  ///         @Flag
+  ///         var verbose: Bool = false
+  ///
+  ///         @Argument(parsing: .unconditionalRemaining)
+  ///         var words: [String] = []
   ///     }
   ///
-  /// Parsing the input `--verbose one two --other` would include the `--other`
-  /// flag in `words`, resulting in
-  /// `Options(verbose: true, words: ["one", "two", "--other"])`.
+  /// Parsing the input `--verbose one two --verbose` includes the second
+  /// `--verbose` flag in `words`, resulting in
+  /// `Options(verbose: true, words: ["one", "two", "--verbose"])`.
   ///
   /// - Note: This parsing strategy can be surprising for users, particularly
   ///   when combined with options and flags. Prefer `remaining` whenever
   ///   possible, since users can always terminate options and flags with
   ///   the `--` terminator. With the `remaining` parsing strategy, the input
-  ///   `--verbose -- one two --other` would have the same result as the above
-  ///   example: `Options(verbose: true, words: ["one", "two", "--other"])`.
-  case unconditionalRemaining
+  ///   `--verbose -- one two --verbose` would have the same result as the above
+  ///   example: `Options(verbose: true, words: ["one", "two", "--verbose"])`.
+  public static var unconditionalRemaining: ArgumentArrayParsingStrategy {
+    self.init(base: .allRemainingInput)
+  }
 }
 
 extension Argument {
@@ -225,37 +225,15 @@ extension Argument {
       var arg = ArgumentDefinition(
         key: key,
         kind: .positional,
-        parsingStrategy: .nextAsValue,
+        parsingStrategy: .default,
         parser: T.init(argument:),
         default: nil,
         completion: completion ?? T.defaultCompletionKind)
-      arg.help.help = help
+      arg.help.updateArgumentHelp(help: help)
       return ArgumentSet(arg.optional)
     })
   }
   
-  @available(*, deprecated, message: """
-    Default values don't make sense for optional properties.
-    Remove the 'default' parameter if its value is nil,
-    or make your property non-optional if it's non-nil.
-    """)
-  public init<T: ExpressibleByArgument>(
-    default initial: T?,
-    help: ArgumentHelp? = nil
-  ) where Value == T? {
-    self.init(_parsedValue: .init { key in
-      ArgumentSet(
-        key: key,
-        kind: .positional,
-        parsingStrategy: .nextAsValue,
-        parseType: T.self,
-        name: .long,
-        default: initial,
-        help: help,
-        completion: T.defaultCompletionKind)
-    })
-  }
-
   /// Creates a property with an optional default value, intended to be called by other constructors to centralize logic.
   ///
   /// This private `init` allows us to expose multiple other similar constructors to allow for standard default property initialization while reducing code duplication.
@@ -282,40 +260,6 @@ extension Argument {
       })
       return ArgumentSet(arg)
     })
-  }
-
-  /// Creates a property that reads its value from an argument, parsing with
-  /// the given closure.
-  ///
-  /// This method is deprecated, with usage split into two other methods below:
-  /// - `init(wrappedValue:help:transform:)` for properties with a default value
-  /// - `init(help:transform:)` for properties with no default value
-  ///
-  /// Existing usage of the `default` parameter should be replaced such as follows:
-  /// ```diff
-  /// -@Argument(default: "bar", transform: baz)
-  /// -var foo: String
-  /// +@Argument(transform: baz)
-  /// +var foo: String = "bar"
-  /// ```
-  ///
-  /// - Parameters:
-  ///   - initial: A default value to use for this property.
-  ///   - help: Information about how to use this argument.
-  ///   - transform: A closure that converts a string into this property's
-  ///     type or throws an error.
-  @available(*, deprecated, message: "Use regular property initialization for default values (`var foo: String = \"bar\"`)")
-  public init(
-    default initial: Value?,
-    help: ArgumentHelp? = nil,
-    transform: @escaping (String) throws -> Value
-  ) {
-    self.init(
-      initial: initial,
-      help: help,
-      completion: nil,
-      transform: transform
-    )
   }
 
   /// Creates a property with a default value provided by standard Swift default value syntax, parsing with the given closure.
@@ -394,12 +338,17 @@ extension Argument {
         helpDefaultValue = nil
       }
 
-      let help = ArgumentDefinition.Help(options: [.isOptional, .isRepeating], help: help, key: key)
+      let help = ArgumentDefinition.Help(
+        allValues: Element.allValueStrings,
+        options: [.isOptional, .isRepeating],
+        help: help,
+        key: key
+      )
       var arg = ArgumentDefinition(
         kind: .positional,
         help: help,
         completion: completion ?? Element.defaultCompletionKind,
-        parsingStrategy: parsingStrategy == .remaining ? .nextAsValue : .allRemainingInput,
+        parsingStrategy: parsingStrategy.base,
         update: .appendToArray(forType: Element.self, key: key),
         initial: setInitialValue)
       arg.help.defaultValue = helpDefaultValue
@@ -487,7 +436,7 @@ extension Argument {
         kind: .positional,
         help: help,
         completion: completion ?? .default,
-        parsingStrategy: parsingStrategy == .remaining ? .nextAsValue : .allRemainingInput,
+        parsingStrategy: parsingStrategy.base,
         update: .unary({
           (origin, name, valueString, parsedValues) in
           do {
@@ -537,7 +486,7 @@ extension Argument {
   ///
   /// This method is called to initialize an array `Argument` with no default value such as:
   /// ```swift
-  /// @Argument(tranform: baz)
+  /// @Argument(transform: baz)
   /// var foo: [String]
   /// ```
   ///
