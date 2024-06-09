@@ -22,12 +22,15 @@ final class DumpHelpGenerationTests: XCTestCase {
 extension DumpHelpGenerationTests {
   struct A: ParsableCommand {
     enum TestEnum: String, CaseIterable, ExpressibleByArgument {
-      case a, b, c
+      case a = "one", b = "two", c = "three"
     }
 
     @Option
     var enumeratedOption: TestEnum
 
+    @Option
+    var enumeratedOptionWithDefaultValue: TestEnum = .b
+    
     @Option
     var noHelpOption: Int
     
@@ -47,8 +50,22 @@ extension DumpHelpGenerationTests {
     var argWithDefaultValue: Int = 1
   }
   
+  struct Options: ParsableArguments {
+    @Flag var verbose = false
+    @Option var name: String
+  }
+  
+  struct B: ParsableCommand {
+    @OptionGroup(title: "Other")
+    var options: Options
+  }
+  
   public func testDumpA() throws {
     try AssertDump(for: A.self, equals: Self.aDumpText)
+  }
+  
+  public func testDumpB() throws {
+    try AssertDump(for: B.self, equals: Self.bDumpText)
   }
   
   public func testDumpExampleCommands() throws {
@@ -80,9 +97,9 @@ extension DumpHelpGenerationTests {
     "arguments" : [
       {
         "allValues" : [
-          "a",
-          "b",
-          "c"
+          "one",
+          "two",
+          "three"
         ],
         "isOptional" : false,
         "isRepeating" : false,
@@ -99,6 +116,29 @@ extension DumpHelpGenerationTests {
         },
         "shouldDisplay" : true,
         "valueName" : "enumerated-option"
+      },
+      {
+        "allValues" : [
+          "one",
+          "two",
+          "three"
+        ],
+        "defaultValue" : "two",
+        "isOptional" : true,
+        "isRepeating" : false,
+        "kind" : "option",
+        "names" : [
+          {
+            "kind" : "long",
+            "name" : "enumerated-option-with-default-value"
+          }
+        ],
+        "preferredName" : {
+          "kind" : "long",
+          "name" : "enumerated-option-with-default-value"
+        },
+        "shouldDisplay" : true,
+        "valueName" : "enumerated-option-with-default-value"
       },
       {
         "isOptional" : false,
@@ -180,7 +220,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show help information.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -207,6 +247,75 @@ extension DumpHelpGenerationTests {
 }
 """
 
+  static let bDumpText: String = """
+{
+  "command" : {
+    "arguments" : [
+      {
+        "isOptional" : true,
+        "isRepeating" : false,
+        "kind" : "flag",
+        "names" : [
+          {
+            "kind" : "long",
+            "name" : "verbose"
+          }
+        ],
+        "preferredName" : {
+          "kind" : "long",
+          "name" : "verbose"
+        },
+        "sectionTitle" : "Other",
+        "shouldDisplay" : true,
+        "valueName" : "verbose"
+      },
+      {
+        "isOptional" : false,
+        "isRepeating" : false,
+        "kind" : "option",
+        "names" : [
+          {
+            "kind" : "long",
+            "name" : "name"
+          }
+        ],
+        "preferredName" : {
+          "kind" : "long",
+          "name" : "name"
+        },
+        "sectionTitle" : "Other",
+        "shouldDisplay" : true,
+        "valueName" : "name"
+      },
+      {
+        "abstract" : "Show help information.",
+        "isOptional" : true,
+        "isRepeating" : false,
+        "kind" : "flag",
+        "names" : [
+          {
+            "kind" : "short",
+            "name" : "h"
+          },
+          {
+            "kind" : "long",
+            "name" : "help"
+          }
+        ],
+        "preferredName" : {
+          "kind" : "long",
+          "name" : "help"
+        },
+        "shouldDisplay" : true,
+        "valueName" : "help"
+      }
+    ],
+    "commandName" : "b"
+  },
+  "serializationVersion" : 0
+}
+"""
+
   static let mathDumpText: String = """
 {
   "command" : {
@@ -214,7 +323,7 @@ extension DumpHelpGenerationTests {
     "arguments" : [
       {
         "abstract" : "Show the version.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -232,7 +341,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show help information.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -290,7 +399,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -308,7 +417,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -369,7 +478,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -387,7 +496,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -418,7 +527,7 @@ extension DumpHelpGenerationTests {
         "arguments" : [
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -436,7 +545,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -496,7 +605,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show the version.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -514,7 +623,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show help information.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -554,7 +663,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show the version.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -572,7 +681,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show help information.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -762,7 +871,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show the version.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -780,7 +889,7 @@ extension DumpHelpGenerationTests {
               },
               {
                 "abstract" : "Show help information.",
-                "isOptional" : false,
+                "isOptional" : true,
                 "isRepeating" : false,
                 "kind" : "flag",
                 "names" : [
@@ -816,6 +925,7 @@ extension DumpHelpGenerationTests {
   },
   "serializationVersion" : 0
 }
+
 """
 
   static let mathAddDumpText: String = """
@@ -855,7 +965,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show the version.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -873,7 +983,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show help information.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -901,6 +1011,7 @@ extension DumpHelpGenerationTests {
   },
   "serializationVersion" : 0
 }
+
 """
 
   static let mathMultiplyDumpText: String = """
@@ -940,7 +1051,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show the version.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -958,7 +1069,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show help information.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -986,6 +1097,7 @@ extension DumpHelpGenerationTests {
   },
   "serializationVersion" : 0
 }
+
 """
 
   static let mathStatsDumpText: String = """
@@ -995,7 +1107,7 @@ extension DumpHelpGenerationTests {
     "arguments" : [
       {
         "abstract" : "Show the version.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -1013,7 +1125,7 @@ extension DumpHelpGenerationTests {
       },
       {
         "abstract" : "Show help information.",
-        "isOptional" : false,
+        "isOptional" : true,
         "isRepeating" : false,
         "kind" : "flag",
         "names" : [
@@ -1073,7 +1185,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1091,7 +1203,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1131,7 +1243,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1149,7 +1261,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1339,7 +1451,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show the version.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1357,7 +1469,7 @@ extension DumpHelpGenerationTests {
           },
           {
             "abstract" : "Show help information.",
-            "isOptional" : false,
+            "isOptional" : true,
             "isRepeating" : false,
             "kind" : "flag",
             "names" : [
@@ -1391,5 +1503,6 @@ extension DumpHelpGenerationTests {
   },
   "serializationVersion" : 0
 }
+
 """
 }

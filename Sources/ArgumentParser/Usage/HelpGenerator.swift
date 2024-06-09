@@ -10,9 +10,9 @@
 //===----------------------------------------------------------------------===//
 
 internal struct HelpGenerator {
-  static var helpIndent = 2
-  static var labelColumnWidth = 26
-  static var systemScreenWidth: Int { _terminalSize().width }
+  static let helpIndent = 2
+  static let labelColumnWidth = 26
+  static var systemScreenWidth: Int { Platform.terminalWidth }
 
   struct Section {
     struct Element: Hashable {
@@ -51,6 +51,7 @@ internal struct HelpGenerator {
       case positionalArguments
       case subcommands
       case options
+      case title(String)
       
       var description: String {
         switch self {
@@ -60,6 +61,8 @@ internal struct HelpGenerator {
           return "Subcommands"
         case .options:
           return "Options"
+        case .title(let name):
+          return name
         }
       }
     }
@@ -94,7 +97,7 @@ internal struct HelpGenerator {
       fatalError()
     }
     
-    let currentArgSet = ArgumentSet(currentCommand, visibility: visibility)
+    let currentArgSet = ArgumentSet(currentCommand, visibility: visibility, parent: nil)
     self.commandStack = commandStack
 
     // Build the tool name and subcommand name from the command configuration
@@ -136,6 +139,10 @@ internal struct HelpGenerator {
     
     var positionalElements: [Section.Element] = []
     var optionElements: [Section.Element] = []
+    
+    // Simulate an ordered dictionary using a dictionary and array for ordering.
+    var titledSections: [String: [Section.Element]] = [:]
+    var sectionTitles: [String] = []
 
     /// Start with a full slice of the ArgumentSet so we can peel off one or
     /// more elements at a time.
@@ -144,8 +151,23 @@ internal struct HelpGenerator {
       assert(arg.help.visibility.isAtLeastAsVisible(as: visibility))
       
       let synopsis: String
-      let description: String
-      
+      let abstract: String
+
+      let allValueStrings = arg.help.allValueStrings.filter { !$0.isEmpty }
+      let defaultValue = arg.help.defaultValue ?? ""
+
+      let allAndDefaultValues: String
+      switch (!allValueStrings.isEmpty, !defaultValue.isEmpty) {
+      case (false, false):
+        allAndDefaultValues = ""
+      case (true, false):
+        allAndDefaultValues = "(values: \(allValueStrings.joined(separator: ", ")))"
+      case (false, true):
+        allAndDefaultValues = "(default: \(defaultValue))"
+      case (true, true):
+        allAndDefaultValues = "(values: \(allValueStrings.joined(separator: ", ")); default: \(defaultValue))"
+      }
+
       if arg.help.isComposite {
         // If this argument is composite, we have a group of arguments to
         // output together.
@@ -157,35 +179,33 @@ internal struct HelpGenerator {
           .lazy
           .map { $0.synopsisForHelp }
           .joined(separator: "/")
-
-        let defaultValue = arg.help.defaultValue
-          .map { "(default: \($0))" } ?? ""
-
-        let descriptionString = groupedArgs
+        abstract = groupedArgs
           .lazy
           .map { $0.help.abstract }
-          .first { !$0.isEmpty }
-
-        description = [descriptionString, defaultValue]
-          .lazy
-          .compactMap { $0 }
-          .filter { !$0.isEmpty }
-          .joined(separator: " ")
+          .first { !$0.isEmpty } ?? ""
       } else {
         synopsis = arg.synopsisForHelp
-
-        let defaultValue = arg.help.defaultValue.flatMap { $0.isEmpty ? nil : "(default: \($0))" }
-        description = [arg.help.abstract, defaultValue]
-          .lazy
-          .compactMap { $0 }
-          .filter { !$0.isEmpty }
-          .joined(separator: " ")
+        abstract = arg.help.abstract
       }
       
-      let element = Section.Element(label: synopsis, abstract: description, discussion: arg.help.discussion)
-      if case .positional = arg.kind {
+      let description = [abstract, allAndDefaultValues]
+        .lazy
+        .filter { !$0.isEmpty }
+        .joined(separator: " ")
+
+      let element = Section.Element(
+        label: synopsis,
+        abstract: description,
+        discussion: arg.help.discussion)
+      switch (arg.kind, arg.help.parentTitle) {
+      case (_, let sectionTitle) where !sectionTitle.isEmpty:
+        if !titledSections.keys.contains(sectionTitle) {
+          sectionTitles.append(sectionTitle)
+        }
+        titledSections[sectionTitle, default: []].append(element)
+      case (.positional, _):
         positionalElements.append(element)
-      } else {
+      default:
         optionElements.append(element)
       }
     }
@@ -195,6 +215,9 @@ internal struct HelpGenerator {
       configuration.subcommands.compactMap { command in
         guard command.configuration.shouldDisplay else { return nil }
         var label = command._commandName
+        for alias in command.configuration.aliases {
+            label += ", \(alias)"
+        }
         if command == configuration.defaultSubcommand {
             label += " (default)"
         }
@@ -203,8 +226,16 @@ internal struct HelpGenerator {
           abstract: command.configuration.abstract)
     }
     
+    // Combine the compiled groups in this order:
+    // - arguments
+    // - named sections
+    // - options/flags
+    // - subcommands
     return [
       Section(header: .positionalArguments, elements: positionalElements),
+    ] + sectionTitles.map { name in
+      Section(header: .title(name), elements: titledSections[name, default: []])
+    } + [
       Section(header: .options, elements: optionElements),
       Section(header: .subcommands, elements: subcommandElements),
     ]
@@ -271,7 +302,7 @@ fileprivate extension NameSpecification {
   /// step, the name are returned in descending order.
   func generateHelpNames(visibility: ArgumentVisibility) -> [Name] {
     self
-      .makeNames(InputKey(rawValue: "help"))
+      .makeNames(InputKey(name: "help", parent: nil))
       .compactMap { name in
         guard visibility.base != .default else { return name }
         switch name {
@@ -307,7 +338,13 @@ internal extension BidirectionalCollection where Element == ParsableCommand.Type
       else { return nil }
     return ArgumentDefinition(
       kind: .named([.long("version")]),
-      help: .init(help: "Show the version.", key: InputKey(rawValue: "")),
+      help: .init(
+        allValueStrings: [],
+        options: [.isOptional],
+        help: "Show the version.",
+        defaultValue: nil,
+        key: InputKey(name: "", parent: nil),
+        isComposite: false),
       completion: .default,
       update: .nullary({ _, _, _ in })
     )
@@ -318,7 +355,13 @@ internal extension BidirectionalCollection where Element == ParsableCommand.Type
     guard !names.isEmpty else { return nil }
     return ArgumentDefinition(
       kind: .named(names),
-      help: .init(help: "Show help information.", key: InputKey(rawValue: "")),
+      help: .init(
+        allValueStrings: [],
+        options: [.isOptional],
+        help: "Show help information.",
+        defaultValue: nil,
+        key: InputKey(name: "", parent: nil),
+        isComposite: false),
       completion: .default,
       update: .nullary({ _, _, _ in })
     )
@@ -328,8 +371,12 @@ internal extension BidirectionalCollection where Element == ParsableCommand.Type
     return ArgumentDefinition(
       kind: .named([.long("experimental-dump-help")]),
       help: .init(
+        allValueStrings: [],
+        options: [.isOptional],
         help: ArgumentHelp("Dump help information as JSON."),
-        key: InputKey(rawValue: "")),
+        defaultValue: nil,
+        key: InputKey(name: "", parent: nil),
+        isComposite: false),
       completion: .default,
       update: .nullary({ _, _, _ in })
     )
@@ -338,7 +385,7 @@ internal extension BidirectionalCollection where Element == ParsableCommand.Type
   /// Returns the ArgumentSet for the last command in this stack, including
   /// help and version flags, when appropriate.
   func argumentsForHelp(visibility: ArgumentVisibility) -> ArgumentSet {
-    guard var arguments = self.last.map({ ArgumentSet($0, visibility: visibility) })
+    guard var arguments = self.last.map({ ArgumentSet($0, visibility: visibility, parent: nil) })
       else { return ArgumentSet() }
     self.versionArgumentDefinition().map { arguments.append($0) }
     self.helpArgumentDefinition().map { arguments.append($0) }
@@ -348,44 +395,4 @@ internal extension BidirectionalCollection where Element == ParsableCommand.Type
     
     return arguments
   }
-}
-
-#if canImport(Glibc)
-import Glibc
-func ioctl(_ a: Int32, _ b: Int32, _ p: UnsafeMutableRawPointer) -> Int32 {
-  ioctl(CInt(a), UInt(b), p)
-}
-#elseif canImport(Darwin)
-import Darwin
-#elseif canImport(CRT)
-import CRT
-import WinSDK
-#endif
-
-func _terminalSize() -> (width: Int, height: Int) {
-#if os(WASI)
-  // WASI doesn't yet support terminal size
-  return (80, 25)
-#elseif os(Windows)
-  var csbi: CONSOLE_SCREEN_BUFFER_INFO = CONSOLE_SCREEN_BUFFER_INFO()
-  guard GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi) else {
-    return (80, 25)
-  }
-  return (width: Int(csbi.srWindow.Right - csbi.srWindow.Left) + 1,
-          height: Int(csbi.srWindow.Bottom - csbi.srWindow.Top) + 1)
-#else
-  var w = winsize()
-#if os(OpenBSD)
-  // TIOCGWINSZ is a complex macro, so we need the flattened value.
-  let tiocgwinsz = Int32(0x40087468)
-  let err = ioctl(STDOUT_FILENO, tiocgwinsz, &w)
-#else
-  let err = ioctl(STDOUT_FILENO, TIOCGWINSZ, &w)
-#endif
-  let width = Int(w.ws_col)
-  let height = Int(w.ws_row)
-  guard err == 0 else { return (80, 25) }
-  return (width: width > 0 ? width : 80,
-          height: height > 0 ? height : 25)
-#endif
 }

@@ -10,7 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 /// Visibility level of an argument's help.
-public struct ArgumentVisibility {
+public struct ArgumentVisibility: Hashable {
   /// Internal implementation of `ArgumentVisibility` to allow for easier API
   /// evolution.
   internal enum Representation {
@@ -30,6 +30,8 @@ public struct ArgumentVisibility {
   /// Never show help for this argument.
   public static let `private` = Self(base: .private)
 }
+
+extension ArgumentVisibility: Sendable { }
 
 extension ArgumentVisibility.Representation {
   /// A raw Integer value that represents each visibility level.

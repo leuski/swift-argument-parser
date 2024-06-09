@@ -58,10 +58,10 @@ fileprivate struct Bar: ParsableArguments {
     case B
     case C
   }
-  @Option() var name: String?
-  @Option() var format: Format?
+  @Option() var name: String? = nil
+  @Option() var format: Format? = nil
   @Option() var foo: String
-  @Argument() var bar: String?
+  @Argument() var bar: String? = nil
 }
 
 extension OptionalEndToEndTests {
@@ -204,5 +204,31 @@ extension OptionalEndToEndTests {
     XCTAssertThrowsError(try Bar.parse(["--name", "A", "-f"]))
     XCTAssertThrowsError(try Bar.parse(["D", "--name", "A"]))
     XCTAssertThrowsError(try Bar.parse(["-f", "--name", "A"]))
+  }
+}
+
+extension OptionalEndToEndTests {
+  // Compilation test: https://github.com/apple/swift-argument-parser/issues/618
+  private struct Command: ParsableCommand {
+    struct MyError: Error {}
+    struct Foo {
+      init?(string: String) { return nil }
+    }
+
+    @Option(transform: {
+      guard let foo = Foo(string: $0) else {
+        throw MyError()
+      }
+      return foo
+    })
+    var testOption: Foo?
+    
+    @Argument(transform: {
+      guard let foo = Foo(string: $0) else {
+        throw MyError()
+      }
+      return foo
+    })
+    var testArgument: Foo?
   }
 }

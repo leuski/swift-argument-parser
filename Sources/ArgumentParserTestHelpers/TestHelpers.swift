@@ -9,9 +9,40 @@
 //
 //===----------------------------------------------------------------------===//
 
-@testable import ArgumentParser
+import ArgumentParser
 import ArgumentParserToolInfo
 import XCTest
+
+@available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
+extension CollectionDifference.Change {
+  var offset: Int {
+    switch self {
+    case .insert(let offset, _, _):
+      return offset
+    case .remove(let offset, _, _):
+      return offset
+    }
+  }
+}
+
+@available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *)
+extension CollectionDifference.Change: Swift.Comparable 
+  where ChangeElement: Equatable
+{
+  public static func < (lhs: Self, rhs: Self) -> Bool {
+    guard lhs.offset == rhs.offset else {
+      return lhs.offset < rhs.offset
+    }
+    switch (lhs, rhs) {
+    case (.remove, .insert):
+      return true
+    case (.insert, .remove):
+      return false
+    default:
+      return true
+    }
+  }
+}
 
 // extensions to the ParsableArguments protocol to facilitate XCTestExpectation support
 public protocol TestableParsableArguments: ParsableArguments {
@@ -52,7 +83,7 @@ public func AssertResultFailure<T, U: Error>(
   switch expression() {
   case .success:
     let msg = message()
-    XCTFail(msg.isEmpty ? "Incorrectly succeeded" : msg, file: (file), line: line)
+    XCTFail(msg.isEmpty ? "Incorrectly succeeded" : msg, file: file, line: line)
   case .failure:
     break
   }
@@ -61,10 +92,10 @@ public func AssertResultFailure<T, U: Error>(
 public func AssertErrorMessage<A>(_ type: A.Type, _ arguments: [String], _ errorMessage: String, file: StaticString = #file, line: UInt = #line) where A: ParsableArguments {
   do {
     _ = try A.parse(arguments)
-    XCTFail("Parsing should have failed.", file: (file), line: line)
+    XCTFail("Parsing should have failed.", file: file, line: line)
   } catch {
     // We expect to hit this path, i.e. getting an error:
-    XCTAssertEqual(A.message(for: error), errorMessage, file: (file), line: line)
+    XCTAssertEqual(A.message(for: error), errorMessage, file: file, line: line)
   }
 }
 
@@ -98,23 +129,83 @@ public func AssertParseCommand<A: ParsableCommand>(_ rootCommand: ParsableComman
     try closure(aCommand)
   } catch {
     let message = rootCommand.message(for: error)
-    XCTFail("\"\(message)\" — \(error)", file: (file), line: line)
+    XCTFail("\"\(message)\" — \(error)", file: file, line: line)
   }
 }
 
-public func AssertEqualStringsIgnoringTrailingWhitespace(_ string1: String, _ string2: String, file: StaticString = #file, line: UInt = #line) {
-  let lines1 = string1.split(separator: "\n", omittingEmptySubsequences: false)
-  let lines2 = string2.split(separator: "\n", omittingEmptySubsequences: false)
-  
-  XCTAssertEqual(lines1.count, lines2.count, "Strings have different numbers of lines.", file: (file), line: line)
-  for (line1, line2) in zip(lines1, lines2) {
-    XCTAssertEqual(line1.trimmed(), line2.trimmed(), file: (file), line: line)
+public func AssertEqualStrings(
+  actual: String,
+  expected: String,
+  file: StaticString = #file,
+  line: UInt = #line
+) {
+  // If the input strings are not equal, create a simple diff for debugging...
+  guard actual != expected else {
+    // Otherwise they are equal, early exit.
+    return
   }
+
+  let stringComparison: String
+
+  // If collectionDifference is available, use it to make a nicer error message.
+  if #available(macOS 10.15, iOS 13.0, watchOS 6.0, tvOS 13.0, *) {
+    let actualLines = actual.components(separatedBy: .newlines)
+    let expectedLines = expected.components(separatedBy: .newlines)
+
+    let difference = actualLines.difference(from: expectedLines)
+
+    var result = ""
+
+    var insertions = [Int: String]()
+    var removals = [Int: String]()
+
+    for change in difference {
+      switch change {
+      case .insert(let offset, let element, _):
+        insertions[offset] = element
+      case .remove(let offset, let element, _):
+        removals[offset] = element
+      }
+    }
+
+    var expectedLine = 0
+    var actualLine = 0
+
+    while expectedLine < expectedLines.count || actualLine < actualLines.count {
+      if let removal = removals[expectedLine] {
+        result += "–\(removal)\n"
+        expectedLine += 1
+      } else if let insertion = insertions[actualLine] {
+        result += "+\(insertion)\n"
+        actualLine += 1
+      } else {
+        result += " \(expectedLines[expectedLine])\n"
+        expectedLine += 1
+        actualLine += 1
+      }
+    }
+
+    stringComparison = result
+  } else {
+    stringComparison = """
+      Expected:
+      \(expected)
+
+      Actual:
+      \(actual)
+      """
+  }
+
+  XCTFail(
+    "Actual output does not match the expected output:\n\(stringComparison)",
+    file: file,
+    line: line)
 }
 
 public func AssertHelp<T: ParsableArguments>(
   _ visibility: ArgumentVisibility,
   for _: T.Type,
+  columns: Int? = 80,
   equals expected: String,
   file: StaticString = #file,
   line: UInt = #line
@@ -122,7 +213,7 @@ public func AssertHelp<T: ParsableArguments>(
   let flag: String
   let includeHidden: Bool
 
-  switch visibility.base {
+  switch visibility {
   case .default:
     flag = "--help"
     includeHidden = false
@@ -130,7 +221,10 @@ public func AssertHelp<T: ParsableArguments>(
     flag = "--help-hidden"
     includeHidden = true
   case .private:
-    XCTFail("Should not be called.")
+    XCTFail("Should not be called.", file: file, line: line)
+    return
+  default:
+    XCTFail("Unrecognized visibility.", file: file, line: line)
     return
   }
 
@@ -138,40 +232,41 @@ public func AssertHelp<T: ParsableArguments>(
     _ = try T.parse([flag])
     XCTFail(file: file, line: line)
   } catch {
-    let helpString = T.fullMessage(for: error)
-    AssertEqualStringsIgnoringTrailingWhitespace(
-      helpString, expected, file: file, line: line)
+    let helpString = T.fullMessage(for: error, columns: columns)
+    AssertEqualStrings(actual: helpString, expected: expected, file: file, line: line)
   }
 
-  let helpString = T.helpMessage(includeHidden: includeHidden, columns: nil)
-  AssertEqualStringsIgnoringTrailingWhitespace(
-    helpString, expected, file: file, line: line)
+  let helpString = T.helpMessage(includeHidden: includeHidden, columns: columns)
+  AssertEqualStrings(actual: helpString, expected: expected, file: file, line: line)
 }
 
 public func AssertHelp<T: ParsableCommand, U: ParsableCommand>(
   _ visibility: ArgumentVisibility,
   for _: T.Type,
   root _: U.Type,
+  columns: Int? = 80,
   equals expected: String,
   file: StaticString = #file,
   line: UInt = #line
 ) {
   let includeHidden: Bool
 
-  switch visibility.base {
+  switch visibility {
   case .default:
     includeHidden = false
   case .hidden:
     includeHidden = true
   case .private:
-    XCTFail("Should not be called.")
+    XCTFail("Should not be called.", file: file, line: line)
+    return
+  default:
+    XCTFail("Unrecognized visibility.", file: file, line: line)
     return
   }
 
   let helpString = U.helpMessage(
-    for: T.self, includeHidden: includeHidden, columns: nil)
-  AssertEqualStringsIgnoringTrailingWhitespace(
-    helpString, expected, file: file, line: line)
+    for: T.self, includeHidden: includeHidden, columns: columns)
+  AssertEqualStrings(actual: helpString, expected: expected, file: file, line: line)
 }
 
 public func AssertDump<T: ParsableArguments>(
@@ -180,21 +275,25 @@ public func AssertDump<T: ParsableArguments>(
 ) throws {
   do {
     _ = try T.parse(["--experimental-dump-help"])
-    XCTFail(file: (file), line: line)
+    XCTFail(file: file, line: line)
   } catch {
     let dumpString = T.fullMessage(for: error)
-    try AssertJSONEqualFromString(actual: dumpString, expected: expected, for: ToolInfoV0.self)
+    try AssertJSONEqualFromString(actual: dumpString, expected: expected, for: ToolInfoV0.self, file: file, line: line)
   }
 
-  try AssertJSONEqualFromString(actual: T._dumpHelp(), expected: expected, for: ToolInfoV0.self)
+  try AssertJSONEqualFromString(actual: T._dumpHelp(), expected: expected, for: ToolInfoV0.self, file: file, line: line)
 }
 
-public func AssertJSONEqualFromString<T: Codable & Equatable>(actual: String, expected: String, for type: T.Type) throws {
-  let actualJSONData = try XCTUnwrap(actual.data(using: .utf8))
-  let actualDumpJSON = try XCTUnwrap(JSONDecoder().decode(type, from: actualJSONData))
+public func AssertJSONEqualFromString<T: Codable & Equatable>(actual: String, expected: String, for type: T.Type, file: StaticString = #file, line: UInt = #line) throws {
+  if #available(macOS 10.13, iOS 11.0, tvOS 11.0, watchOS 4.0, *) {
+    AssertEqualStrings(actual: actual, expected: expected, file: file, line: line)
+  }
 
-  let expectedJSONData = try XCTUnwrap(expected.data(using: .utf8))
-  let expectedDumpJSON = try XCTUnwrap(JSONDecoder().decode(type, from: expectedJSONData))
+  let actualJSONData = try XCTUnwrap(actual.data(using: .utf8), file: file, line: line)
+  let actualDumpJSON = try XCTUnwrap(JSONDecoder().decode(type, from: actualJSONData), file: file, line: line)
+
+  let expectedJSONData = try XCTUnwrap(expected.data(using: .utf8), file: file, line: line)
+  let expectedDumpJSON = try XCTUnwrap(JSONDecoder().decode(type, from: expectedJSONData), file: file, line: line)
   XCTAssertEqual(actualDumpJSON, expectedDumpJSON)
 }
 
@@ -226,12 +325,16 @@ extension XCTest {
     exitCode: ExitCode = .success,
     file: StaticString = #file, line: UInt = #line) throws
   {
+    #if os(Windows)
+    throw XCTSkip("Unsupported on this platform")
+    #endif
+
     let arguments = Array(command.dropFirst())
     let commandName = String(command.first!)
     let commandURL = debugURL.appendingPathComponent(commandName)
     guard (try? commandURL.checkResourceIsReachable()) ?? false else {
       XCTFail("No executable at '\(commandURL.standardizedFileURL.path)'.",
-              file: (file), line: line)
+              file: file, line: line)
       return
     }
     
@@ -251,7 +354,7 @@ extension XCTest {
     
     if #available(macOS 10.13, *) {
       guard (try? process.run()) != nil else {
-        XCTFail("Couldn't run command process.", file: (file), line: line)
+        XCTFail("Couldn't run command process.", file: file, line: line)
         return
       }
     } else {
@@ -266,10 +369,14 @@ extension XCTest {
     let errorActual = String(data: errorData, encoding: .utf8)!.trimmingCharacters(in: .whitespacesAndNewlines)
     
     if let expected = expected {
-      AssertEqualStringsIgnoringTrailingWhitespace(expected, errorActual + outputActual, file: file, line: line)
+      AssertEqualStrings(
+        actual: errorActual + outputActual,
+        expected: expected,
+        file: file,
+        line: line)
     }
 
-    XCTAssertEqual(process.terminationStatus, exitCode.rawValue, file: (file), line: line)
+    XCTAssertEqual(process.terminationStatus, exitCode.rawValue, file: file, line: line)
     #else
     throw XCTSkip("Not supported on this platform")
     #endif
@@ -278,8 +385,12 @@ extension XCTest {
   public func AssertJSONOutputEqual(
     command: String,
     expected: String,
-    file: StaticString = #file, line: UInt = #line
+    file: StaticString = #file,
+    line: UInt = #line
   ) throws {
+    #if os(Windows)
+    throw XCTSkip("Unsupported on this platform")
+    #endif
 
     let splitCommand = command.split(separator: " ")
     let arguments = splitCommand.dropFirst().map(String.init)
@@ -288,7 +399,7 @@ extension XCTest {
     let commandURL = debugURL.appendingPathComponent(commandName)
     guard (try? commandURL.checkResourceIsReachable()) ?? false else {
       XCTFail("No executable at '\(commandURL.standardizedFileURL.path)'.",
-              file: (file), line: line)
+              file: file, line: line)
       return
     }
 
@@ -308,7 +419,7 @@ extension XCTest {
 
     if #available(macOS 10.13, *) {
       guard (try? process.run()) != nil else {
-        XCTFail("Couldn't run command process.", file: (file), line: line)
+        XCTFail("Couldn't run command process.", file: file, line: line)
         return
       }
     } else {
@@ -318,19 +429,23 @@ extension XCTest {
 
     let outputString = try XCTUnwrap(String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8))
     XCTAssertTrue(error.fileHandleForReading.readDataToEndOfFile().isEmpty, "Error occurred with `--experimental-dump-help`")
-    try AssertJSONEqualFromString(actual: outputString, expected: expected, for: ToolInfoV0.self)
+    try AssertJSONEqualFromString(actual: outputString, expected: expected, for: ToolInfoV0.self, file: file, line: line)
     #else
     throw XCTSkip("Not supported on this platform")
     #endif
   }
 
   public func AssertGenerateManual(
-    singlePage: Bool,
+    multiPage: Bool,
     command: String,
     expected: String,
     file: StaticString = #file,
     line: UInt = #line
   ) throws {
+    #if os(Windows)
+    throw XCTSkip("Unsupported on this platform")
+    #endif
+
     let commandURL = debugURL.appendingPathComponent(command)
     var command = [
       "generate-manual", commandURL.path,
@@ -341,8 +456,8 @@ extension XCTest {
       "--authors", "The Appleseeds<appleseeds@apple.com>",
       "--output-directory", "-",
     ]
-    if singlePage {
-      command.append("--single-page")
+    if multiPage {
+      command.append("--multi-page")
     }
     try AssertExecuteCommand(
       command: command,

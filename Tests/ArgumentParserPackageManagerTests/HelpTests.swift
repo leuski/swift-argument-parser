@@ -14,6 +14,11 @@ import XCTest
 import ArgumentParserTestHelpers
 
 final class HelpTests: XCTestCase {
+  override func setUp() {
+    #if !os(Windows) && !os(WASI)
+    unsetenv("COLUMNS")
+    #endif
+  }
 }
 
 func getErrorText<T: ParsableArguments>(_: T.Type, _ arguments: [String]) -> String {
@@ -119,21 +124,24 @@ extension HelpTests {
                                           Build with configuration (default: debug)
                   --enable-automatic-resolution/--disable-automatic-resolution
                                           Use automatic resolution if Package.resolved file is
-                                          out-of-date (default: true)
+                                          out-of-date (default: --enable-automatic-resolution)
                   --enable-index-store/--disable-index-store
-                                          Use indexing-while-building feature (default: true)
+                                          Use indexing-while-building feature (default:
+                                          --enable-index-store)
                   --enable-package-manifest-caching/--disable-package-manifest-caching
-                                          Cache Package.swift manifests (default: true)
+                                          Cache Package.swift manifests (default:
+                                          --enable-package-manifest-caching)
                   --enable-prefetching/--disable-prefetching
-                                          (default: true)
+                                          (default: --enable-prefetching)
                   --enable-sandbox/--disable-sandbox
                                           Use sandbox when executing subprocesses (default:
-                                          true)
+                                          --enable-sandbox)
                   --enable-pubgrub-resolver/--disable-pubgrub-resolver
                                           [Experimental] Enable the new Pubgrub dependency
-                                          resolver (default: false)
+                                          resolver (default: --disable-pubgrub-resolver)
                   --static-swift-stdlib/--no-static-swift-stdlib
-                                          Link Swift stdlib statically (default: false)
+                                          Link Swift stdlib statically (default:
+                                          --no-static-swift-stdlib)
                   --package-path <package-path>
                                           Change working directory before any other operation
                                           (default: .)
@@ -240,7 +248,7 @@ extension HelpTests {
 }
 
 struct SubCommandCustomHelp: ParsableCommand {
-  static var configuration = CommandConfiguration (
+  static let configuration = CommandConfiguration (
     helpNames: [.customShort("p"), .customLong("parent-help")]
   )
 
@@ -249,7 +257,7 @@ struct SubCommandCustomHelp: ParsableCommand {
   }
 
   struct ModifiedHelp: ParsableCommand {
-    static var configuration = CommandConfiguration (
+    static let configuration = CommandConfiguration (
       helpNames: [.customShort("s"), .customLong("subcommand-help")]
     )
 

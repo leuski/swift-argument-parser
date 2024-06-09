@@ -1,4 +1,4 @@
-// swift-tools-version:5.6
+// swift-tools-version:5.8
 //===----------------------------------------------------------*- swift -*-===//
 //
 // This source file is part of the Swift Argument Parser open source project
@@ -18,6 +18,9 @@ var package = Package(
         .library(
             name: "ArgumentParser",
             targets: ["ArgumentParser"]),
+        .plugin(
+            name: "GenerateManual",
+            targets: ["GenerateManual"]),
     ],
     dependencies: [],
     targets: [
@@ -25,7 +28,10 @@ var package = Package(
         .target(
             name: "ArgumentParser",
             dependencies: ["ArgumentParserToolInfo"],
-            exclude: ["CMakeLists.txt"]),
+            exclude: ["CMakeLists.txt"],
+            swiftSettings: [
+              .enableExperimentalFeature("StrictConcurrency"),
+            ]),
         .target(
             name: "ArgumentParserTestHelpers",
             dependencies: ["ArgumentParser", "ArgumentParserToolInfo"],
@@ -37,10 +43,10 @@ var package = Package(
 
         // Plugins
         .plugin(
-            name: "GenerateManualPlugin",
+            name: "GenerateManual",
             capability: .command(
                 intent: .custom(
-                    verb: "experimental-generate-manual",
+                    verb: "generate-manual",
                     description: "Generate a manual entry for a specified target.")),
             dependencies: ["generate-manual"]),
 

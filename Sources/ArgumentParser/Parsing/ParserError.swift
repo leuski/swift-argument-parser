@@ -31,7 +31,7 @@ enum ParserError: Error {
   case duplicateExclusiveValues(previous: InputOrigin, duplicate: InputOrigin, originalInput: [String])
   /// We need a value for the given key, but it’s not there. Some non-optional option or argument is missing.
   case noValue(forKey: InputKey)
-  case unableToParseValue(InputOrigin, Name?, String, forKey: InputKey, originalError: Error? = nil)
+  case unableToParseValue(InputOrigin, Name?, String, forKey: InputKey, originalError: Error?)
   case missingSubcommand
   case userValidationError(Error)
   case noArguments(Error)
@@ -39,7 +39,7 @@ enum ParserError: Error {
 
 /// These are errors used internally to the parsing, and will not be exposed to the help generation.
 enum InternalParseError: Error {
-  case wrongType(Any?, forKey: InputKey)
+  case wrongType(valueRepresentation: String, forKey: InputKey)
   case subcommandNameMismatch
   case subcommandLevelMismatch(Int, Int)
   case subcommandLevelMissing(Int)

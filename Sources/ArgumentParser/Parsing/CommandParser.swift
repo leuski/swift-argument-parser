@@ -41,11 +41,13 @@ struct CommandParser {
       self.commandTree = try Tree(root: rootCommand)
     } catch Tree<ParsableCommand.Type>.InitializationError.recursiveSubcommand(let command) {
       fatalError("The ParsableCommand \"\(command)\" can't have itself as its own subcommand.")
+    } catch Tree<ParsableCommand.Type>.InitializationError.aliasMatchingCommand(let command) {
+      fatalError("The ParsableCommand \"\(command)\" can't have an alias with the same name as the command itself.")
     } catch {
       fatalError("Unexpected error: \(error).")
     }
     self.currentNode = commandTree
-    
+
     // A command tree that has a depth greater than zero gets a `help`
     // subcommand.
     if !commandTree.isLeaf {
@@ -84,7 +86,7 @@ extension CommandParser {
     _ split: SplitArguments,
     requireSoloArgument: Bool = false
   ) throws {
-    guard !requireSoloArgument || split.count == 1 else { return }
+    guard !requireSoloArgument || split.originalInput.count == 1 else { return }
     
     // Look for help flags
     guard !split.contains(anyOf: self.commandStack.getHelpNames(visibility: .default)) else {
@@ -139,15 +141,17 @@ extension CommandParser {
   /// Extracts the current command from `split`, throwing if decoding isn't
   /// possible.
   fileprivate mutating func parseCurrent(_ split: inout SplitArguments) throws -> ParsableCommand {
-    // Build the argument set (i.e. information on how to parse):
-    let commandArguments = ArgumentSet(currentNode.element, visibility: .private)
-    
     // Parse the arguments, ignoring anything unexpected
-    let values = try commandArguments.lenientParse(
-      split,
-      subcommands: currentNode.element.configuration.subcommands,
-      defaultCapturesAll: currentNode.element.defaultIncludesUnconditionalArguments)
-
+    var parser = LenientParser(currentNode.element, split)
+    let values = try parser.parse()
+    
+    if currentNode.element.includesAllUnrecognizedArgument {
+      // If this command includes an all-unrecognized argument, any built-in
+      // flags will have been parsed into that argument. Check for flags
+      // before decoding.
+      try checkForBuiltInFlags(values.capturedUnrecognizedArguments)
+    }
+    
     // Decode the values from ParsedValues into the ParsableCommand:
     let decoder = ArgumentDecoder(values: values, previouslyDecoded: decodedArguments)
     var decodedResult: ParsableCommand
@@ -325,7 +329,7 @@ extension CommandParser {
     let completionValues = Array(args)
 
     // Generate the argument set and parse the argument to find in the set
-    let argset = ArgumentSet(current.element, visibility: .private)
+    let argset = ArgumentSet(current.element, visibility: .private, parent: nil)
     let parsedArgument = try! parseIndividualArg(argToMatch, at: 0).first!
     
     // Look up the specified argument and retrieve its custom completion function

@@ -21,10 +21,10 @@ import PackageDescription
 let package = Package(
     name: "Count",
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
     ],
     targets: [
-        .target(
+        .executableTarget(
             name: "count",
             dependencies: [.product(name: "ArgumentParser", package: "swift-argument-parser")]),
     ]
@@ -63,10 +63,11 @@ struct Count: ParsableCommand {
 
 In the code above, the `inputFile` and `outputFile` properties use the `@Argument` property wrapper. `ArgumentParser` uses this wrapper to denote a positional command-line input — because `inputFile` is specified first in the `Count` type, it's the first value read from the command line, and `outputFile` is the second.
 
-We've implemented the command's logic in its `run()` method. Here, we're printing out a message confirming the names of the files the user gave. (You can find a full implementation of the completed command at the end of this guide.)
+The command's logic is implemented in its `run()` method. Here, it prints out a message confirming the names of the files the user gave. (You can find a full implementation of the completed command at the end of this guide.)
 
-Finally, you designate the `Count` command as the program's entry point by applying the `@main` attribute. When running your command, the `ArgumentParser` library parses the command-line arguments, verifies that they match up with what we've defined in `Count`, and either calls the `run()` method or exits with a helpful message.
+Finally, the `Count` command is designated as the program's entry point by applying the `@main` attribute. When running your command, the `ArgumentParser` library parses the command-line arguments, verifies that they match up with what we've defined in `Count`, and either calls the `run()` method or exits with a helpful message.
 
+> Note: The Swift compiler uses either the type marked with `@main` or a `main.swift` file as the entry point for an executable program. You can use either one, but not both — rename your `main.swift` file to the name of the command when you add `@main`. In this case, rename the file to `Count.swift`.   
 
 ## Working with Named Options
 
@@ -80,6 +81,7 @@ Counting words in 'readme.md' and writing the result into 'readme.counts'.
 We do this by using the `@Option` property wrapper instead of `@Argument`:
 
 ```swift
+@main
 struct Count: ParsableCommand {
     @Option var inputFile: String
     @Option var outputFile: String
@@ -118,6 +120,7 @@ Counting words in 'readme.md' and writing the result into 'readme.counts'.
 Let's change our `Count` type to look like this:
 
 ```swift
+@main
 struct Count: ParsableCommand {
     @Option var inputFile: String
     @Option var outputFile: String
@@ -155,6 +158,7 @@ Counting words in 'readme.md' and writing the result into 'readme.counts'.
 Customize the input names by passing `name` parameters to the `@Option` and `@Flag` initializers:
 
 ```swift
+@main
 struct Count: ParsableCommand {
     @Option(name: [.short, .customLong("input")])
     var inputFile: String
@@ -189,6 +193,7 @@ OPTIONS:
 This is a great start — you can see that all the custom names are visible, and the help shows that values are expected for the `--input` and `--output` options. However, our custom options and flag don't have any descriptive text. Let's add that now by passing string literals as the `help` parameter:
 
 ```swift
+@main
 struct Count: ParsableCommand {
     @Option(name: [.short, .customLong("input")], help: "A file to read.")
     var inputFile: String
@@ -282,3 +287,31 @@ struct RuntimeError: Error, CustomStringConvertible {
     }
 }
 ```
+
+
+## Next Steps … Swift concurrency
+
+`ArgumentParser` supports Swift concurrency, notably `async` renditions of `run`. If you use `async` rendition of `run`, conform to `AsyncParsableCommand` instead of `ParsableCommand`.
+
+```swift
+@main
+struct FileUtility: AsyncParsableCommand {
+    @Argument(
+        help: "File to be parsed.",
+        transform: URL.init(fileURLWithPath:)
+    )
+    var file: URL
+
+    mutating func run() async throws {
+        let handle = try FileHandle(forReadingFrom: file)
+
+        for try await line in handle.bytes.lines {
+            // do something with each line
+        }
+
+        try handle.close()
+    }
+}
+```
+
+> Note: If you accidentally use `ParsableCommand` with an `async` rendition of `run`, the app may never reach your `run` function and may only show the `USAGE` text. If you are using `async` version of `run`, you must use `AsyncParsableCommand`.

@@ -10,7 +10,6 @@
 //===----------------------------------------------------------------------===//
 
 import PackagePlugin
-import Foundation
 
 @main
 struct GenerateManualPlugin: CommandPlugin {
@@ -85,7 +84,7 @@ struct GenerateManualPlugin: CommandPlugin {
         outputDirectory.string
       ]
       generationToolArguments.append(
-        contentsOf: extractor.unextractedOptionsOrFlags)
+        contentsOf: extractor.remainingArguments)
 
       // Spawn generation tool.
       try generationToolFile.exec(arguments: generationToolArguments)

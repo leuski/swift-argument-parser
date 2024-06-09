@@ -9,11 +9,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_implementationOnly import Foundation
+#if swift(>=5.11)
+internal import ArgumentParserToolInfo
+internal import class Foundation.JSONEncoder
+#elseif swift(>=5.10)
+import ArgumentParserToolInfo
+import class Foundation.JSONEncoder
+#else
 @_implementationOnly import ArgumentParserToolInfo
+@_implementationOnly import class Foundation.JSONEncoder
+#endif
 
 internal struct DumpHelpGenerator {
-  var toolInfo: ToolInfoV0
+  private var toolInfo: ToolInfoV0
 
   init(_ type: ParsableArguments.Type) {
     self.init(commandStack: [type.asCommand])
@@ -38,7 +46,7 @@ fileprivate extension BidirectionalCollection where Element == ParsableCommand.T
   /// Returns the ArgumentSet for the last command in this stack, including
   /// help and version flags, when appropriate.
   func allArguments() -> ArgumentSet {
-    guard var arguments = self.last.map({ ArgumentSet($0, visibility: .private) })
+    guard var arguments = self.last.map({ ArgumentSet($0, visibility: .private, parent: nil) })
     else { return ArgumentSet() }
     self.versionArgumentDefinition().map { arguments.append($0) }
     self.helpArgumentDefinition().map { arguments.append($0) }
@@ -126,13 +134,14 @@ fileprivate extension ArgumentInfoV0 {
     self.init(
       kind: kind,
       shouldDisplay: argument.help.visibility.base == .default,
+      sectionTitle: argument.help.parentTitle.nonEmpty,
       isOptional: argument.help.options.contains(.isOptional),
       isRepeating: argument.help.options.contains(.isRepeating),
       names: argument.names.map(ArgumentInfoV0.NameInfoV0.init),
       preferredName: argument.names.preferredName.map(ArgumentInfoV0.NameInfoV0.init),
       valueName: argument.valueName,
       defaultValue: argument.help.defaultValue,
-      allValues: argument.help.allValues,
+      allValues: argument.help.allValueStrings,
       abstract: argument.help.abstract,
       discussion: argument.help.discussion)
   }

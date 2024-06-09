@@ -13,25 +13,25 @@ import ArgumentParser
 import Foundation
 
 @main
-@available(macOS 10.15, *)
+@available(macOS 12, *)
 struct CountLines: AsyncParsableCommand {
     @Argument(
         help: "A file to count lines in. If omitted, counts the lines of stdin.",
         completion: .file(), transform: URL.init(fileURLWithPath:))
-    var inputFile: URL?
+    var inputFile: URL? = nil
     
     @Option(help: "Only count lines with this prefix.")
-    var prefix: String?
+    var prefix: String? = nil
     
     @Flag(help: "Include extra information in the output.")
     var verbose = false
 }
 
-@available(macOS 10.15, *)
+@available(macOS 12, *)
 extension CountLines {
     var fileHandle: FileHandle {
         get throws {
-            guard let inputFile = inputFile else {
+            guard let inputFile else {
                 return .standardInput
             }
             return try FileHandle(forReadingFrom: inputFile)
@@ -50,7 +50,7 @@ extension CountLines {
             print("Lines from stdin", terminator: "")
         }
         
-        if let prefix = prefix {
+        if let prefix {
             print(", prefixed by '\(prefix)'", terminator: "")
         }
         
@@ -58,11 +58,6 @@ extension CountLines {
     }
     
     mutating func run() async throws {
-        guard #available(macOS 12, *) else {
-          print("'count-lines' isn't supported on this platform.")
-          return
-        }
-      
         let countAllLines = prefix == nil
         let lineCount = try await fileHandle.bytes.lines.reduce(0) { count, line in
             if countAllLines || line.starts(with: prefix!) {

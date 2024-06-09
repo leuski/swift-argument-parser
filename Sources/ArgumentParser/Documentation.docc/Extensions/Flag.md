@@ -27,13 +27,8 @@
 
 ### Infrequently Used APIs
 
-- ``init(from:)``
 - ``wrappedValue``
 
 ### Supporting Types
 
 - ``FlagExclusivity``
-
-### Deprecated APIs
-
-- ``init()``

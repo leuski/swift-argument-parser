@@ -10,7 +10,8 @@ Begin by declaring a type that defines
 the information that you need to collect from the command line.
 Decorate each stored property with one of `ArgumentParser`'s property wrappers,
 declare conformance to ``ParsableCommand``,
-and implement your command's logic in its `run()` method.
+and implement your command's logic in its `run()` method. 
+For `async` renditions of `run`, declare ``AsyncParsableCommand`` conformance instead.
 
 ```swift
 import ArgumentParser
@@ -21,7 +22,7 @@ struct Repeat: ParsableCommand {
     var phrase: String
 
     @Option(help: "The number of times to repeat 'phrase'.")
-    var count: Int?
+    var count: Int? = nil
 
     mutating func run() throws {
         let repeatCount = count ?? 2
@@ -51,6 +52,8 @@ and then either calls your `run()` method or exits with a useful message.
 - <doc:GettingStarted>
 - ``ParsableCommand``
 - ``AsyncParsableCommand``
+- <doc:CommandsAndSubcommands>
+- <doc:CustomizingCommandHelp>
 
 ### Arguments, Options, and Flags
 
