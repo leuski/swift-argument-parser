@@ -21,7 +21,7 @@ fileprivate extension Collection {
 // - and the type of the property wrapper in case we need to warn the
 //    programmer about a missing editor
 
-public struct PropertyMetadata {
+public enum PropertyMetadataNamespace {
   // Copying from ArgumentDefinition
   /// This folds the public `ArrayParsingStrategy` and
   /// `SingleValueParsingStrategy`
@@ -78,12 +78,41 @@ public struct PropertyMetadata {
     /// Argument specified only as a `--flag` on the command line.
     case flag
   }
+}
 
-  public let kind: Kind
+public protocol DiscussionMetadataProtocol {
+  var abstract: String? { get }
+  var discussion: String? { get }
+}
+
+public protocol PropertyMetadata: DiscussionMetadataProtocol {
+  var kind: PropertyMetadataNamespace.Kind { get }
   /// All names of the argument.
-  public let names: [NameInfo]?
+  var names: [PropertyMetadataNamespace.NameInfo]? { get }
   /// The best name to use when referring to the argument in help displays.
-  public let preferredName: NameInfo?
+  var preferredName: PropertyMetadataNamespace.NameInfo? { get }
+  /// Name of argument's value.
+  var valueName: String? { get }
+  /// Short description of the argument's functionality.
+  var abstract: String? { get }
+  /// Extended description of the argument's functionality.
+  var discussion: String? { get }
+
+  var parsingStrategy: PropertyMetadataNamespace.ParsingStrategy { get }
+
+  var id: String { get }
+
+  var initialValue: Any? { get }
+
+  var type: Any.Type { get }
+}
+
+public struct ConcretePropertyMetadata<Value>: PropertyMetadata {
+  public let kind: PropertyMetadataNamespace.Kind
+  /// All names of the argument.
+  public let names: [PropertyMetadataNamespace.NameInfo]?
+  /// The best name to use when referring to the argument in help displays.
+  public let preferredName: PropertyMetadataNamespace.NameInfo?
   /// Name of argument's value.
   public let valueName: String?
   /// Short description of the argument's functionality.
@@ -91,44 +120,50 @@ public struct PropertyMetadata {
   /// Extended description of the argument's functionality.
   public let discussion: String?
 
-  public let parsingStrategy: ParsingStrategy
+  public let parsingStrategy: PropertyMetadataNamespace.ParsingStrategy
 
   public let id: String
 
-  public let initialValue: Any?
+  public var initialValue: Any? { value }
 
   public let type: Any.Type
+
+  public let value: Value?
 }
 
-fileprivate extension PropertyMetadata {
+fileprivate extension ConcretePropertyMetadata {
   init?(_ arg: ArgumentSet, key: InputKey, type: Any.Type) {
     guard
-      let argument = arg.first(where: { Kind(argument: $0) != nil }),
-      let kind = Kind(argument: argument)
+      let argument = arg.first(where: {
+        PropertyMetadataNamespace.Kind(argument: $0) != nil }),
+      let kind = PropertyMetadataNamespace.Kind(argument: argument)
     else { return nil }
 
     self.type = type
     // the initial period is here for historical reasons.
     self.id = "." + key.fullPath.joined(separator: ".")
     self.kind = kind
-    self.names = argument.names.map(NameInfo.init)
-    self.preferredName = argument.names.preferredName.map(NameInfo.init)
+    self.names = argument.names
+      .map(PropertyMetadataNamespace.NameInfo.init)
+    self.preferredName = argument.names.preferredName
+      .map(PropertyMetadataNamespace.NameInfo.init)
     self.valueName = argument.valueName.nonEmpty
     self.abstract = argument.help.abstract.nonEmpty
     self.discussion = argument.help.discussion.nonEmpty
-    self.parsingStrategy = ParsingStrategy(argument.parsingStrategy)
+    self.parsingStrategy = PropertyMetadataNamespace
+      .ParsingStrategy(argument.parsingStrategy)
 
     do {
       var values = ParsedValues(originalInput: [])
       try argument.initial(InputOrigin(), &values)
-      self.initialValue = values.elements[key]?.value
+      self.value = values.elements[key]?.value as? Value
     } catch {
-      self.initialValue = nil
+      self.value = nil
     }
   }
 }
 
-fileprivate extension PropertyMetadata.ParsingStrategy {
+fileprivate extension PropertyMetadataNamespace.ParsingStrategy {
   init(_ value: ArgumentDefinition.ParsingStrategy) {
     switch value {
     case .default: self = .default
@@ -142,7 +177,7 @@ fileprivate extension PropertyMetadata.ParsingStrategy {
   }
 }
 
-fileprivate extension PropertyMetadata.Kind {
+fileprivate extension PropertyMetadataNamespace.Kind {
   init?(argument: ArgumentDefinition) {
     switch argument.kind {
     case .named:
@@ -160,7 +195,7 @@ fileprivate extension PropertyMetadata.Kind {
   }
 }
 
-fileprivate extension PropertyMetadata.NameInfo {
+fileprivate extension PropertyMetadataNamespace.NameInfo {
   init(name: Name) {
     switch name {
     case let .long(n):
@@ -180,7 +215,7 @@ private protocol _MetadataExtractor {
 extension _MetadataExtractor where Self: ParsedWrapper {
   func _metadata(for key: InputKey) -> [PropertyMetadata]? {
     let argumentSet = argumentSet(for: key)
-    let metadata = PropertyMetadata(
+    let metadata = ConcretePropertyMetadata<Self.Value>(
       argumentSet, key: key, type: Swift.type(of: self))
     return metadata.map { [$0] }
   }
