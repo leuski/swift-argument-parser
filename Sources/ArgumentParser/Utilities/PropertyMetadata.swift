@@ -5,12 +5,7 @@
 //  Created by Anton Leuski on 11/4/20.
 //
 
-fileprivate extension Collection {
-  /// - returns: A non-empty collection or `nil`.
-  var nonEmpty: Self? { isEmpty ? nil : self }
-}
-
-// This is adopted (from the old version) to be very similar to the
+// This is created to be very similar to the
 // ArgumnetInfoV0 struct. Key deifferences:
 // - we store parsingStrategy for the property. We need it to generate the
 //    command line correctly.
@@ -22,28 +17,58 @@ fileprivate extension Collection {
 //    programmer about a missing editor
 
 public enum PropertyMetadataNamespace {
-  // Copying from ArgumentDefinition
-  /// This folds the public `ArrayParsingStrategy` and
-  /// `SingleValueParsingStrategy`
-  /// into a single enum.
-  public enum ParsingStrategy {
-    /// Expect the next `SplitArguments.Element` to be
-    /// a value and parse it. Will fail if the next
-    /// input is an option.
-    case `default`
-    /// Parse the next `SplitArguments.Element.value`
-    case scanningForValue
-    /// Parse the next `SplitArguments.Element` as
-    /// a value, regardless of its type.
-    case unconditional
-    /// Parse multiple `SplitArguments.Element.value`
-    /// up to the next non-`.value`
-    case upToNextOption
-    /// Parse all remaining `SplitArguments.Element`
-    /// as values, regardless of its type.
-    case allRemainingInput
-    case postTerminator
-    case allUnrecognized
+  public struct ArgumentParsing {
+    public let propertyID: String
+    public let strategy: ArgumentArrayParsingStrategy
+    public init(id: String, strategy: ArgumentArrayParsingStrategy) {
+      self.propertyID = id
+      self.strategy = strategy
+    }
+    init(key: InputKey, strategy: ArgumentArrayParsingStrategy) {
+      self.init(id: key.fullPath.joined(separator: "."), strategy: strategy)
+    }
+  }
+
+  public struct OptionParsing {
+    public enum Strategy {
+      case array(ArrayParsingStrategy)
+      case singleValue(SingleValueParsingStrategy)
+    }
+    public let propertyID: String
+    public let strategy: Strategy
+    public let preferredName: NameInfo?
+    public init(id: String, strategy: Strategy, preferredName: NameInfo?) {
+      self.propertyID = id
+      self.strategy = strategy
+      self.preferredName = preferredName
+    }
+    init(key: InputKey, strategy: Strategy, preferredName: NameInfo?) {
+      self.init(
+        id: key.fullPath.joined(separator: "."),
+        strategy: strategy, preferredName: preferredName)
+    }
+  }
+
+  public struct FlagParsing {
+    public enum Kind {
+      case regular(NameInfo?)
+      case enumerated([NameInfo?])
+    }
+    public let propertyID: String
+    public let kind: Kind
+    public init(id: String, kind: Kind) {
+      self.propertyID = id
+      self.kind = kind
+    }
+    init(key: InputKey, kind: Kind) {
+      self.init(id: key.fullPath.joined(separator: "."), kind: kind)
+    }
+  }
+
+  public enum Kind {
+    case argument(ArgumentParsing)
+    case option(OptionParsing)
+    case flag(FlagParsing)
   }
 
   /// Information about an argument's name.
@@ -68,131 +93,6 @@ public enum PropertyMetadataNamespace {
       self.name = name
     }
   }
-
-  /// Kind of argument.
-  public enum Kind: String, Codable, Hashable {
-    /// Argument specified as a bare value on the command line.
-    case positional
-    /// Argument specified as a value prefixed by a `--flag` on the command line.
-    case option
-    /// Argument specified only as a `--flag` on the command line.
-    case flag
-  }
-}
-
-public protocol DiscussionMetadataProtocol {
-  var abstract: String? { get }
-  var discussion: String? { get }
-}
-
-public protocol PropertyMetadata: DiscussionMetadataProtocol {
-  var kind: PropertyMetadataNamespace.Kind { get }
-  /// All names of the argument.
-  var names: [PropertyMetadataNamespace.NameInfo]? { get }
-  /// The best name to use when referring to the argument in help displays.
-  var preferredName: PropertyMetadataNamespace.NameInfo? { get }
-  /// Name of argument's value.
-  var valueName: String? { get }
-  /// Short description of the argument's functionality.
-  var abstract: String? { get }
-  /// Extended description of the argument's functionality.
-  var discussion: String? { get }
-
-  var parsingStrategy: PropertyMetadataNamespace.ParsingStrategy { get }
-
-  var id: String { get }
-
-  var initialValue: Any? { get }
-
-  var type: Any.Type { get }
-}
-
-public struct ConcretePropertyMetadata<Value>: PropertyMetadata {
-  public let kind: PropertyMetadataNamespace.Kind
-  /// All names of the argument.
-  public let names: [PropertyMetadataNamespace.NameInfo]?
-  /// The best name to use when referring to the argument in help displays.
-  public let preferredName: PropertyMetadataNamespace.NameInfo?
-  /// Name of argument's value.
-  public let valueName: String?
-  /// Short description of the argument's functionality.
-  public let abstract: String?
-  /// Extended description of the argument's functionality.
-  public let discussion: String?
-
-  public let parsingStrategy: PropertyMetadataNamespace.ParsingStrategy
-
-  public let id: String
-
-  public var initialValue: Any? { value }
-
-  public let type: Any.Type
-
-  public let value: Value?
-}
-
-fileprivate extension ConcretePropertyMetadata {
-  init?(_ arg: ArgumentSet, key: InputKey, type: Any.Type) {
-    guard
-      let argument = arg.first(where: {
-        PropertyMetadataNamespace.Kind(argument: $0) != nil }),
-      let kind = PropertyMetadataNamespace.Kind(argument: argument)
-    else { return nil }
-
-    self.type = type
-    // the initial period is here for historical reasons.
-    self.id = "." + key.fullPath.joined(separator: ".")
-    self.kind = kind
-    self.names = argument.names
-      .map(PropertyMetadataNamespace.NameInfo.init)
-    self.preferredName = argument.names.preferredName
-      .map(PropertyMetadataNamespace.NameInfo.init)
-    self.valueName = argument.valueName.nonEmpty
-    self.abstract = argument.help.abstract.nonEmpty
-    self.discussion = argument.help.discussion.nonEmpty
-    self.parsingStrategy = PropertyMetadataNamespace
-      .ParsingStrategy(argument.parsingStrategy)
-
-    do {
-      var values = ParsedValues(originalInput: [])
-      try argument.initial(InputOrigin(), &values)
-      self.value = values.elements[key]?.value as? Value
-    } catch {
-      self.value = nil
-    }
-  }
-}
-
-fileprivate extension PropertyMetadataNamespace.ParsingStrategy {
-  init(_ value: ArgumentDefinition.ParsingStrategy) {
-    switch value {
-    case .default: self = .default
-    case .scanningForValue: self = .scanningForValue
-    case .unconditional: self = .unconditional
-    case .upToNextOption: self = .upToNextOption
-    case .allRemainingInput: self = .allRemainingInput
-    case .postTerminator: self = .postTerminator
-    case .allUnrecognized: self = .allUnrecognized
-    }
-  }
-}
-
-fileprivate extension PropertyMetadataNamespace.Kind {
-  init?(argument: ArgumentDefinition) {
-    switch argument.kind {
-    case .named:
-      switch argument.update {
-      case .nullary:
-        self = .flag
-      case .unary:
-        self = .option
-      }
-    case .positional:
-      self = .positional
-    case .default:
-      return nil
-    }
-  }
 }
 
 fileprivate extension PropertyMetadataNamespace.NameInfo {
@@ -209,109 +109,213 @@ fileprivate extension PropertyMetadataNamespace.NameInfo {
 }
 
 private protocol _MetadataExtractor {
-  func _metadata(for key: InputKey) -> [PropertyMetadata]?
+  func _metadata<P: CommandModelParser>(
+    for key: InputKey, parser: P) throws -> [P.PropertyModel]
 }
 
 extension _MetadataExtractor where Self: ParsedWrapper {
-  func _metadata(for key: InputKey) -> [PropertyMetadata]? {
-    let argumentSet = argumentSet(for: key)
-    let metadata = ConcretePropertyMetadata<Self.Value>(
-      argumentSet, key: key, type: Swift.type(of: self))
-    return metadata.map { [$0] }
+  func _argument(for key: InputKey) -> ArgumentDefinition? {
+    argumentSet(for: key).first { argument in
+      switch argument.kind {
+      case .named, .positional: return true
+      case .default: return false
+      }
+    }
+  }
+
+  func _initialValue(
+    argument: ArgumentDefinition, for key: InputKey) -> Value?
+  {
+    do {
+      var values = ParsedValues(originalInput: [])
+      try argument.initial(InputOrigin(), &values)
+      return values.elements[key]?.value as? Value
+    } catch {
+      return nil
+    }
   }
 }
 
 extension OptionGroup: _MetadataExtractor {
-  func _metadata(for key: InputKey) -> [PropertyMetadata]? {
-    _parse(Value.self, parent: key)
-  }
-}
-
-extension Argument: _MetadataExtractor {}
-extension Option: _MetadataExtractor {}
-extension Flag: _MetadataExtractor {}
-
-private func _parse(_ type: ParsableArguments.Type, parent: InputKey? = nil)
--> [PropertyMetadata]
-{
-  Mirror(reflecting: type.init())
-    .children
-    .compactMap { child -> [PropertyMetadata]? in
-      guard let childLabel = child.label
-      else { return nil }
-      let key = InputKey(name: childLabel, parent: parent)
-      return (child.value as? _MetadataExtractor)?._metadata(for: key)
-    }
-    .flatMap { $0 }
-}
-
-public struct CommandInfo {
-  public init(
-    superCommands: [String]? = nil,
-    commandName: String,
-    abstract: String? = nil,
-    discussion: String? = nil,
-    subcommands: [CommandInfo]? = nil,
-    arguments: [PropertyMetadata]? = nil)
+  func _metadata<P: CommandModelParser>(
+    for key: InputKey, parser: P) throws -> [P.PropertyModel]
   {
-    self.superCommands = superCommands
-    self.commandName = commandName
-    self.abstract = abstract
-    self.discussion = discussion
-    self.subcommands = subcommands
-    self.arguments = arguments
-  }
-
-  /// Super commands and tools.
-  public var superCommands: [String]?
-  /// Name used to invoke the command.
-  public var commandName: String
-  /// Short description of the command's functionality.
-  public var abstract: String?
-  /// Extended description of the command's functionality.
-  public var discussion: String?
-  /// List of nested commands.
-  public var subcommands: [CommandInfo]?
-  /// List of supported arguments.
-  public var arguments: [PropertyMetadata]?
-
-  public init(commandStack: [ParsableCommand.Type]) {
-    guard let command = commandStack.last else {
-      preconditionFailure("commandStack must not be empty")
-    }
-
-    let parents = commandStack.dropLast()
-    var superCommands = parents.map { $0._commandName }
-    if let superName = parents.first?.configuration._superCommandName {
-      superCommands.insert(superName, at: 0)
-    }
-
-    let subcommands = command.configuration.subcommands
-      .map { subcommand -> CommandInfo in
-        var commandStack = commandStack
-        commandStack.append(subcommand)
-        return CommandInfo(commandStack: commandStack)
-      }
-
-    self = CommandInfo(
-      superCommands: superCommands,
-      commandName: command._commandName,
-      abstract: command.configuration.abstract.nonEmpty,
-      discussion: command.configuration.discussion.nonEmpty,
-      subcommands: subcommands,
-      arguments: _parse(command))
+    try parser._parse(Value.self, parent: key)
   }
 }
 
-extension ParsableCommand {
-//  public static var metadata: [PropertyMetadata] { _parse(self) }
-//
-//  public static var info: CommandInfo {
-//    CommandInfo(
-//      commandName: _commandName,
-//      abstract: configuration.abstract.nonEmpty,
-//      discussion: configuration.discussion.nonEmpty,
-//      subcommands: configuration.subcommands.map { $0.info },
-//      arguments: _parse(self))
-//  }
+extension Argument: _MetadataExtractor {
+  func _metadata<P: CommandModelParser>(
+    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+  {
+    guard let argument = _argument(for: key) else { return [] }
+    return [try parser.parse(
+      property: PropertyMetadataNamespace
+        .PropertyInfo(
+          .argument(PropertyMetadataNamespace.ArgumentParsing(
+            key: key,
+            strategy: .init(base: argument.parsingStrategy))),
+          argument: argument, key: key),
+      initialValue: _initialValue(argument: argument, for: key))]
+  }
+}
+
+private protocol _Array {}
+extension Array: _Array {}
+
+private extension ArgumentDefinition {
+  var _preferredName: PropertyMetadataNamespace.NameInfo? {
+    names.preferredName.map(
+      PropertyMetadataNamespace.NameInfo.init)
+  }
+}
+
+extension Option: _MetadataExtractor  {
+  private static var _isArray: Bool { Value.self is _Array.Type }
+
+  func _metadata<P: CommandModelParser>(
+    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+  {
+    guard let argument = _argument(for: key) else { return [] }
+    return [try parser.parse(
+      property: PropertyMetadataNamespace
+        .PropertyInfo(
+          .option(PropertyMetadataNamespace.OptionParsing(
+            key: key,
+            strategy: Self._isArray
+            ? .array(.init(base: argument.parsingStrategy))
+            : .singleValue(.init(base: argument.parsingStrategy)),
+            preferredName: argument._preferredName)),
+          argument: argument, key: key),
+      initialValue: _initialValue(argument: argument, for: key))]
+  }
+}
+
+private extension EnumerableFlag {
+  static var _names: [PropertyMetadataNamespace.NameInfo?] {
+    allCases.map { item in
+      name(for: item)
+        .makeNames(InputKey(name: String(describing: item), parent: nil))
+        .preferredName
+        .map(PropertyMetadataNamespace.NameInfo.init)
+    }
+  }
+}
+
+extension Flag: _MetadataExtractor  {
+  func _metadata<P: CommandModelParser>(
+    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+  {
+    guard let argument = _argument(for: key) else { return [] }
+    let kind: PropertyMetadataNamespace.FlagParsing.Kind
+    if let type = Value.self as? any EnumerableFlag.Type {
+      kind = .enumerated(type._names)
+    } else {
+      kind = .regular(argument._preferredName)
+    }
+    return [try parser.parse(
+      property: PropertyMetadataNamespace
+        .PropertyInfo(
+          .flag(PropertyMetadataNamespace.FlagParsing(
+            key: key,
+            kind: kind)),
+          argument: argument, key: key),
+      initialValue: _initialValue(argument: argument, for: key))]
+  }
+}
+
+extension PropertyMetadataNamespace {
+  public struct PropertyInfo {
+    internal init(
+      _ kind: Kind,
+      argument: ArgumentDefinition,
+      key: InputKey)
+    {
+      self.kind = kind
+      self.name = argument.valueName
+      self.abstract = argument.help.abstract
+      self.discussion = argument.help.discussion
+      self.id = "." + key.fullPath.joined(separator: ".")
+      self.parentTitle = argument.help.parentTitle
+    }
+
+    public let name: String
+    public let abstract: String
+    public let discussion: String
+    public let kind: Kind
+    public let id: String
+    public let parentTitle: String
+  }
+
+  public struct CommandInfo {
+    internal init(
+      name: String, abstract: String, discussion: String)
+    {
+      self.name = name
+      self.abstract = abstract
+      self.discussion = discussion
+    }
+
+    public let name: String
+    public let abstract: String
+    public let discussion: String
+  }
+}
+
+public protocol CommandModelParser {
+  associatedtype PropertyModel
+
+  func parse<V>(
+    property: PropertyMetadataNamespace.PropertyInfo,
+    initialValue: V?) throws -> PropertyModel
+
+  func parse(
+    propertiesOf command: ParsableCommand.Type) throws -> [PropertyModel]
+
+  func commands(
+    commandStack: [ParsableCommand.Type]) -> [String]
+
+  func info(
+    of command: ParsableCommand.Type) -> PropertyMetadataNamespace.CommandInfo
+}
+
+public extension CommandModelParser {
+  fileprivate func _parse(
+    _ type: ParsableArguments.Type, parent: InputKey? = nil) throws
+  -> [PropertyModel]
+  {
+    try Mirror(reflecting: type.init())
+      .children
+      .compactMap { child -> [PropertyModel]? in
+        guard let childLabel = child.label
+        else { return nil }
+        let key = InputKey(name: childLabel, parent: parent)
+        return try (child.value as? _MetadataExtractor)?
+          ._metadata(for: key, parser: self)
+      }
+      .flatMap { $0 }
+  }
+
+  func parse(
+    propertiesOf command: ParsableCommand.Type) throws -> [PropertyModel]
+  {
+    try _parse(command)
+  }
+
+  func commands(commandStack: [ParsableCommand.Type]) -> [String]
+  {
+    let commands = commandStack.map { $0._commandName }
+    guard let superName = commandStack.first?.configuration._superCommandName
+    else { return commands }
+    return [superName] + commands
+  }
+
+  func info(
+    of command: ParsableCommand.Type) -> PropertyMetadataNamespace.CommandInfo
+  {
+    PropertyMetadataNamespace.CommandInfo(
+      name: command._commandName,
+      abstract: command.configuration.abstract,
+      discussion: command.configuration.discussion)
+  }
 }
