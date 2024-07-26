@@ -110,7 +110,7 @@ fileprivate extension PropertyMetadataNamespace.NameInfo {
 
 private protocol _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+    for key: InputKey, parser: P) throws -> [P.Property]
 }
 
 extension _MetadataExtractor where Self: ParsedWrapper {
@@ -138,7 +138,7 @@ extension _MetadataExtractor where Self: ParsedWrapper {
 
 extension OptionGroup: _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+    for key: InputKey, parser: P) throws -> [P.Property]
   {
     try parser._parse(Value.self, parent: key)
   }
@@ -146,7 +146,7 @@ extension OptionGroup: _MetadataExtractor {
 
 extension Argument: _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+    for key: InputKey, parser: P) throws -> [P.Property]
   {
     guard let argument = _argument(for: key) else { return [] }
     return [try parser.parse(
@@ -160,8 +160,18 @@ extension Argument: _MetadataExtractor {
   }
 }
 
-private protocol _Array {}
-extension Array: _Array {}
+private protocol _Array {
+  static var _elementType: Any.Type { get }
+}
+extension Array: _Array {
+  static var _elementType: Any.Type { Element.self }
+}
+private protocol _Optional {
+  static var _wrappedType: Any.Type { get }
+}
+extension Optional: _Optional {
+  static var _wrappedType: Any.Type { Wrapped.self }
+}
 
 private extension ArgumentDefinition {
   var _preferredName: PropertyMetadataNamespace.NameInfo? {
@@ -174,7 +184,7 @@ extension Option: _MetadataExtractor  {
   private static var _isArray: Bool { Value.self is _Array.Type }
 
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+    for key: InputKey, parser: P) throws -> [P.Property]
   {
     guard let argument = _argument(for: key) else { return [] }
     return [try parser.parse(
@@ -204,13 +214,26 @@ private extension EnumerableFlag {
 
 extension Flag: _MetadataExtractor  {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.PropertyModel]
+    for key: InputKey, parser: P) throws -> [P.Property]
   {
     guard let argument = _argument(for: key) else { return [] }
     let kind: PropertyMetadataNamespace.FlagParsing.Kind
-    if let type = Value.self as? any EnumerableFlag.Type {
+    switch Value.self {
+    case let type as any EnumerableFlag.Type:
       kind = .enumerated(type._names)
-    } else {
+    case let type as _Optional.Type:
+      if let elemType = type._wrappedType as? any EnumerableFlag.Type {
+        kind = .enumerated(elemType._names)
+      } else {
+        kind = .regular(argument._preferredName)
+      }
+    case let type as _Array.Type:
+      if let elemType = type._elementType as? any EnumerableFlag.Type {
+        kind = .enumerated(elemType._names)
+      } else {
+        kind = .regular(argument._preferredName)
+      }
+    default:
       kind = .regular(argument._preferredName)
     }
     return [try parser.parse(
@@ -263,14 +286,14 @@ extension PropertyMetadataNamespace {
 }
 
 public protocol CommandModelParser {
-  associatedtype PropertyModel
+  associatedtype Property
 
   func parse<V>(
     property: PropertyMetadataNamespace.PropertyInfo,
-    initialValue: V?) throws -> PropertyModel
+    initialValue: V?) throws -> Property
 
   func parse(
-    propertiesOf command: ParsableCommand.Type) throws -> [PropertyModel]
+    propertiesOf command: ParsableCommand.Type) throws -> [Property]
 
   func commands(
     commandStack: [ParsableCommand.Type]) -> [String]
@@ -282,11 +305,11 @@ public protocol CommandModelParser {
 public extension CommandModelParser {
   fileprivate func _parse(
     _ type: ParsableArguments.Type, parent: InputKey? = nil) throws
-  -> [PropertyModel]
+  -> [Property]
   {
     try Mirror(reflecting: type.init())
       .children
-      .compactMap { child -> [PropertyModel]? in
+      .compactMap { child -> [Property]? in
         guard let childLabel = child.label
         else { return nil }
         let key = InputKey(name: childLabel, parent: parent)
@@ -297,7 +320,7 @@ public extension CommandModelParser {
   }
 
   func parse(
-    propertiesOf command: ParsableCommand.Type) throws -> [PropertyModel]
+    propertiesOf command: ParsableCommand.Type) throws -> [Property]
   {
     try _parse(command)
   }
