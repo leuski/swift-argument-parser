@@ -110,7 +110,7 @@ fileprivate extension PropertyMetadataNamespace.NameInfo {
 
 private protocol _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.Property]
+    for key: InputKey, parser: P) throws -> P.Property?
 }
 
 extension _MetadataExtractor where Self: ParsedWrapper {
@@ -138,25 +138,27 @@ extension _MetadataExtractor where Self: ParsedWrapper {
 
 extension OptionGroup: _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.Property]
+    for key: InputKey, parser: P) throws -> P.Property?
   {
-    try parser._parse(Value.self, parent: key)
+    try parser.parse(
+      group: key.name, title: self.title,
+      children: parser._parse(Value.self, parent: key))
   }
 }
 
 extension Argument: _MetadataExtractor {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.Property]
+    for key: InputKey, parser: P) throws -> P.Property?
   {
-    guard let argument = _argument(for: key) else { return [] }
-    return [try parser.parse(
+    guard let argument = _argument(for: key) else { return nil }
+    return try parser.parse(
       property: PropertyMetadataNamespace
         .PropertyInfo(
           .argument(PropertyMetadataNamespace.ArgumentParsing(
             key: key,
             strategy: .init(base: argument.parsingStrategy))),
           argument: argument, key: key),
-      initialValue: _initialValue(argument: argument, for: key))]
+      initialValue: _initialValue(argument: argument, for: key))
   }
 }
 
@@ -184,10 +186,10 @@ extension Option: _MetadataExtractor  {
   private static var _isArray: Bool { Value.self is _Array.Type }
 
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.Property]
+    for key: InputKey, parser: P) throws -> P.Property?
   {
-    guard let argument = _argument(for: key) else { return [] }
-    return [try parser.parse(
+    guard let argument = _argument(for: key) else { return nil }
+    return try parser.parse(
       property: PropertyMetadataNamespace
         .PropertyInfo(
           .option(PropertyMetadataNamespace.OptionParsing(
@@ -197,7 +199,7 @@ extension Option: _MetadataExtractor  {
             : .singleValue(.init(base: argument.parsingStrategy)),
             preferredName: argument._preferredName)),
           argument: argument, key: key),
-      initialValue: _initialValue(argument: argument, for: key))]
+      initialValue: _initialValue(argument: argument, for: key))
   }
 }
 
@@ -212,38 +214,34 @@ private extension EnumerableFlag {
   }
 }
 
+private func unwrapEnumerableFlag(
+  _ type: Any.Type?) -> (any EnumerableFlag.Type)?
+{
+  guard let type else { return nil }
+  return (type as? any EnumerableFlag.Type)
+  ?? unwrapEnumerableFlag((type as? _Optional.Type)?._wrappedType)
+  ?? unwrapEnumerableFlag((type as? _Array.Type)?._elementType)
+}
+
 extension Flag: _MetadataExtractor  {
   func _metadata<P: CommandModelParser>(
-    for key: InputKey, parser: P) throws -> [P.Property]
+    for key: InputKey, parser: P) throws -> P.Property?
   {
-    guard let argument = _argument(for: key) else { return [] }
+    guard let argument = _argument(for: key) else { return nil }
     let kind: PropertyMetadataNamespace.FlagParsing.Kind
-    switch Value.self {
-    case let type as any EnumerableFlag.Type:
+    if let type = unwrapEnumerableFlag(Value.self) {
       kind = .enumerated(type._names)
-    case let type as _Optional.Type:
-      if let elemType = type._wrappedType as? any EnumerableFlag.Type {
-        kind = .enumerated(elemType._names)
-      } else {
-        kind = .regular(argument._preferredName)
-      }
-    case let type as _Array.Type:
-      if let elemType = type._elementType as? any EnumerableFlag.Type {
-        kind = .enumerated(elemType._names)
-      } else {
-        kind = .regular(argument._preferredName)
-      }
-    default:
+    } else {
       kind = .regular(argument._preferredName)
     }
-    return [try parser.parse(
+    return try parser.parse(
       property: PropertyMetadataNamespace
         .PropertyInfo(
           .flag(PropertyMetadataNamespace.FlagParsing(
             key: key,
             kind: kind)),
           argument: argument, key: key),
-      initialValue: _initialValue(argument: argument, for: key))]
+      initialValue: _initialValue(argument: argument, for: key))
   }
 }
 
@@ -258,7 +256,7 @@ extension PropertyMetadataNamespace {
       self.name = argument.valueName
       self.abstract = argument.help.abstract
       self.discussion = argument.help.discussion
-      self.id = "." + key.fullPath.joined(separator: ".")
+      self.id = key.name
       self.parentTitle = argument.help.parentTitle
     }
 
@@ -288,6 +286,9 @@ extension PropertyMetadataNamespace {
 public protocol CommandModelParser {
   associatedtype Property
 
+  func parse(
+    group id: String, title: String, children: [Property]) throws -> Property
+
   func parse<V>(
     property: PropertyMetadataNamespace.PropertyInfo,
     initialValue: V?) throws -> Property
@@ -309,14 +310,13 @@ public extension CommandModelParser {
   {
     try Mirror(reflecting: type.init())
       .children
-      .compactMap { child -> [Property]? in
+      .compactMap { child -> Property? in
         guard let childLabel = child.label
         else { return nil }
         let key = InputKey(name: childLabel, parent: parent)
         return try (child.value as? _MetadataExtractor)?
           ._metadata(for: key, parser: self)
       }
-      .flatMap { $0 }
   }
 
   func parse(
