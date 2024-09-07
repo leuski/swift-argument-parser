@@ -332,102 +332,62 @@ extension OptionGroup: _MetadataExtractor {
   }
 }
 
-extension Argument: _MetadataExtractor {
-  fileprivate func _metadata<P: PropertyMetadataParser>(
-    for key: InputKey, parser: P) throws -> P.Property?
-  {
-    guard let argument = _argument(for: key) else { return nil }
-    let propertyInfo = PropertyMetadataNamespace
-      .PropertyInfo(argument: argument, key: key)
-    let initialValue = _initialValue(argument: argument, for: key)
-
-    if let initialValue = initialValue as? _Array {
-      return try initialValue._parse(
-        parser,
-        argument: propertyInfo,
-        strategy: .init(base: argument.parsingStrategy))
-    }
-
-    if let type = Value.self as? any _Array.Type {
-      return try type._parse(
-        parser,
-        argument: propertyInfo,
-        strategy: .init(base: argument.parsingStrategy))
-    }
-
-    if let initialValue = initialValue as? _Optional {
-      return try initialValue._parse(
-        parser,
-        argument: propertyInfo)
-    }
-
-    if let type = Value.self as? any _Optional.Type {
-      return try type._parse(
-        parser,
-        argument: propertyInfo)
-    }
-
-    return try parser.parse(PropertyMetadataNamespace.ArgumentValue(
-      info: propertyInfo, value: initialValue))
-  }
-}
-
 private protocol _Array {
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     argument: PropertyInfo,
-    strategy: ArgumentArrayParsingStrategy) throws -> P.Property
+    strategy: ArgumentArrayParsingStrategy,
+    with parser: P) throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     argument: PropertyInfo,
-    strategy: ArgumentArrayParsingStrategy) throws -> P.Property
+    strategy: ArgumentArrayParsingStrategy,
+    with parser: P) throws -> P.Property
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?) throws -> P.Property
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P) throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?) throws -> P.Property
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P) throws -> P.Property
 }
 
 private protocol _EnumerableFlagArray {
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
 }
 
 extension Array: _Array {
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     argument: PropertyInfo,
-    strategy: ArgumentArrayParsingStrategy)
+    strategy: ArgumentArrayParsingStrategy,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.ArgumentArray(
       info: argument, strategy: strategy, value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     argument: PropertyInfo,
-    strategy: ArgumentArrayParsingStrategy)
+    strategy: ArgumentArrayParsingStrategy,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.ArgumentArray(
       info: argument, strategy: strategy, value: self))
   }
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?)
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.OptionArray(
@@ -435,10 +395,10 @@ extension Array: _Array {
       value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?)
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.OptionArray(
@@ -449,8 +409,8 @@ extension Array: _Array {
 
 extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagArray(
@@ -458,8 +418,8 @@ extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
       value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagArray(
@@ -470,56 +430,56 @@ extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
 
 private protocol _Optional {
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    argument: PropertyInfo) throws -> P.Property
+    argument: PropertyInfo,
+    with parser: P) throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    argument: PropertyInfo) throws -> P.Property
+    argument: PropertyInfo,
+    with parser: P) throws -> P.Property
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?) throws -> P.Property
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P) throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?) throws -> P.Property
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P) throws -> P.Property
 }
 
 private protocol _EnumerableFlagOptional {
   static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
 }
 
 extension Optional: _Optional {
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    argument: PropertyInfo)
+    argument: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.ArgumentOptional(
       info: argument, value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    argument: PropertyInfo)
+    argument: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.ArgumentOptional(
       info: argument, value: self))
   }
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?)
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.OptionOptional(
@@ -527,10 +487,10 @@ extension Optional: _Optional {
       value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
-    preferredName: PropertyMetadataNamespace.NameInfo?)
+    preferredName: PropertyMetadataNamespace.NameInfo?,
+    with parser: P)
   throws -> P.Property
   {
     try parser.parse(PropertyMetadataNamespace.OptionOptional(
@@ -541,8 +501,8 @@ extension Optional: _Optional {
 
 extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagOptional(
@@ -550,8 +510,8 @@ extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
       value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagOptional(
@@ -568,6 +528,46 @@ extension ArgumentDefinition {
   }
 }
 
+extension Argument: _MetadataExtractor {
+  fileprivate func _metadata<P: PropertyMetadataParser>(
+    for key: InputKey, parser: P) throws -> P.Property?
+  {
+    guard let argument = _argument(for: key) else { return nil }
+    let propertyInfo = PropertyMetadataNamespace
+      .PropertyInfo(argument: argument, key: key)
+    let initialValue = _initialValue(argument: argument, for: key)
+
+    if let initialValue,
+       let initialValue = initialValue as? _Array 
+    {
+      return try initialValue._parse(
+        argument: propertyInfo,
+        strategy: .init(base: argument.parsingStrategy), 
+        with: parser)
+    }
+
+    if let type = Value.self as? any _Array.Type {
+      return try type._parse(
+        argument: propertyInfo,
+        strategy: .init(base: argument.parsingStrategy),
+        with: parser)
+    }
+
+    if let initialValue,
+       let initialValue = initialValue as? _Optional 
+    {
+      return try initialValue._parse(argument: propertyInfo, with: parser)
+    }
+
+    if let type = Value.self as? any _Optional.Type {
+      return try type._parse(argument: propertyInfo, with: parser)
+    }
+
+    return try parser.parse(PropertyMetadataNamespace.ArgumentValue(
+      info: propertyInfo, value: initialValue))
+  }
+}
+
 extension Option: _MetadataExtractor  {
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
@@ -577,36 +577,40 @@ extension Option: _MetadataExtractor  {
       .PropertyInfo(argument: argument, key: key)
     let initialValue = _initialValue(argument: argument, for: key)
 
-    if let initialValue = initialValue as? _Array {
+    if let initialValue,
+       let initialValue = initialValue as? _Array 
+    {
       return try initialValue._parse(
-        parser,
         option: propertyInfo,
         strategy: .init(base: argument.parsingStrategy),
-        preferredName: argument._preferredName)
+        preferredName: argument._preferredName,
+        with: parser)
     }
 
     if let type = Value.self as? any _Array.Type {
       return try type._parse(
-        parser,
         option: propertyInfo,
         strategy: .init(base: argument.parsingStrategy),
-        preferredName: argument._preferredName)
+        preferredName: argument._preferredName,
+        with: parser)
     }
 
-    if let initialValue = initialValue as? _Optional {
+    if let initialValue,
+       let initialValue = initialValue as? _Optional 
+    {
       return try initialValue._parse(
-        parser,
         option: propertyInfo,
         strategy: .init(base: argument.parsingStrategy),
-        preferredName: argument._preferredName)
+        preferredName: argument._preferredName,
+        with: parser)
     }
 
     if let type = Value.self as? any _Optional.Type {
       return try type._parse(
-        parser,
         option: propertyInfo,
         strategy: .init(base: argument.parsingStrategy),
-        preferredName: argument._preferredName)
+        preferredName: argument._preferredName,
+        with: parser)
     }
 
     return try parser.parse(PropertyMetadataNamespace.OptionValue(
@@ -625,8 +629,8 @@ extension EnumerableFlag {
     }
   }
   fileprivate static func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagValue(
@@ -634,8 +638,8 @@ extension EnumerableFlag {
       value: nil as Self?))
   }
   fileprivate func _parse<P: PropertyMetadataParser>(
-    _ parser: P,
-    enumerableFlag: PropertyInfo)
+    enumerableFlag: PropertyInfo,
+    with parser: P)
   throws -> P.Property
   {
     return try parser.parse(PropertyMetadataNamespace.EnumerableFlagValue(
@@ -653,28 +657,34 @@ extension Flag: _MetadataExtractor  {
       .PropertyInfo(argument: argument, key: key)
     let initialValue = _initialValue(argument: argument, for: key)
 
-    if let initialValue = initialValue as? _EnumerableFlagArray {
-      return try initialValue._parse(parser, enumerableFlag: propertyInfo)
+    if let initialValue,
+       let initialValue = initialValue as? _EnumerableFlagArray 
+    {
+      return try initialValue._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
     if let type = Value.self as? any _EnumerableFlagArray.Type {
-      return try type._parse(parser, enumerableFlag: propertyInfo)
+      return try type._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
-    if let initialValue = initialValue as? _EnumerableFlagOptional {
-      return try initialValue._parse(parser, enumerableFlag: propertyInfo)
+    if let initialValue,
+       let initialValue = initialValue as? _EnumerableFlagOptional 
+    {
+      return try initialValue._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
     if let type = Value.self as? any _EnumerableFlagOptional.Type {
-      return try type._parse(parser, enumerableFlag: propertyInfo)
+      return try type._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
-    if let initialValue = initialValue as? any EnumerableFlag {
-      return try initialValue._parse(parser, enumerableFlag: propertyInfo)
+    if let initialValue,
+       let initialValue = initialValue as? any EnumerableFlag 
+    {
+      return try initialValue._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
     if let type = Value.self as? any EnumerableFlag.Type {
-      return try type._parse(parser, enumerableFlag: propertyInfo)
+      return try type._parse(enumerableFlag: propertyInfo, with: parser)
     }
 
     return try parser.parse(PropertyMetadataNamespace.FlagValue(
