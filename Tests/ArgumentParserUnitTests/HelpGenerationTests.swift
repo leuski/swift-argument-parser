@@ -283,10 +283,10 @@ extension HelpGenerationTests {
   struct H: ParsableCommand {
     struct CommandWithVeryLongName: ParsableCommand {}
     struct ShortCommand: ParsableCommand {
-      static var configuration: CommandConfiguration = CommandConfiguration(abstract: "Test short command name.")
+      static let configuration: CommandConfiguration = CommandConfiguration(abstract: "Test short command name.")
     }
     struct AnotherCommandWithVeryLongName: ParsableCommand {
-      static var configuration: CommandConfiguration = CommandConfiguration(abstract: "Test long command name.")
+      static let configuration: CommandConfiguration = CommandConfiguration(abstract: "Test long command name.")
     }
     struct AnotherCommand: ParsableCommand {
       @Option()
@@ -474,7 +474,7 @@ extension HelpGenerationTests {
   }
     
   struct Foo: ParsableCommand {
-    public static var configuration = CommandConfiguration(
+    public static let configuration = CommandConfiguration(
       commandName: "foo",
       abstract: "Perform some foo",
       subcommands: [
@@ -512,6 +512,76 @@ extension HelpGenerationTests {
                               Bar Strength
       -h, -help, --help       Show help information.
     
+    """)
+  }
+
+  struct WithSubgroups: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "subgroupings",
+      subcommands: [ M.self ],
+      groupedSubcommands: [
+        CommandGroup(
+          name: "Broken",
+          subcommands: [ Foo.self, Bar.self ]
+        ),
+        CommandGroup(name: "Complicated", subcommands: [ N.self ])
+      ]
+    )
+  }
+
+  func testHelpSubcommandGroups() throws {
+    AssertHelp(.default, for: WithSubgroups.self, equals: """
+    USAGE: subgroupings <subcommand>
+
+    OPTIONS:
+      -h, --help              Show help information.
+
+    SUBCOMMANDS:
+      m
+
+    BROKEN SUBCOMMANDS:
+      foo                     Perform some foo
+      bar                     Perform bar operations
+
+    COMPLICATED SUBCOMMANDS:
+      n
+
+      See 'subgroupings help <subcommand>' for detailed help.
+    """)
+  }
+
+  struct OnlySubgroups: ParsableCommand {
+    static let configuration = CommandConfiguration(
+      commandName: "subgroupings",
+      groupedSubcommands: [
+        CommandGroup(
+          name: "Broken",
+          subcommands: [ Foo.self, Bar.self ]
+        ),
+        CommandGroup(
+          name: "Complicated",
+          subcommands: [ M.self, N.self ]
+        )
+      ]
+    )
+  }
+
+  func testHelpOnlySubcommandGroups() throws {
+    AssertHelp(.default, for: OnlySubgroups.self, equals: """
+    USAGE: subgroupings <subcommand>
+
+    OPTIONS:
+      -h, --help              Show help information.
+
+    BROKEN SUBCOMMANDS:
+      foo                     Perform some foo
+      bar                     Perform bar operations
+
+    COMPLICATED SUBCOMMANDS:
+      m
+      n
+
+      See 'subgroupings help <subcommand>' for detailed help.
     """)
   }
 }
@@ -611,7 +681,7 @@ extension HelpGenerationTests {
   struct AllValues: ParsableCommand {
     enum Manual: Int, ExpressibleByArgument {
       case foo
-      static var allValueStrings = ["bar"]
+      static let allValueStrings = ["bar"]
     }
 
     enum UnspecializedSynthesized: Int, CaseIterable, ExpressibleByArgument {
