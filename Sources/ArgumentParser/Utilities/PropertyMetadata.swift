@@ -14,13 +14,20 @@
 // - we get property id from the variable name
 
 // MARK: - public code
+/// A minimal abstraction that erases concrete property wrappers into a common
+/// interface for metadata extraction. Each concrete wrapper in
+/// `PropertyMetadataNamespace` conforms to this protocol.
 public protocol PropertyWrapper<Value> {
   associatedtype Value
   var value: Value? { get }
   var metadata: PropertyMetadataNamespace.PropertyMetadata { get }
 }
 
-/// A unique namespace for most of the types we added.
+/// A unique namespace for most of the types added by the metadata layer.
+///
+/// This namespace hosts plain data structures used by the parser to describe
+/// arguments, options, flags, and their groupings in a form suitable for UI
+/// or tooling.
 public enum PropertyMetadataNamespace {
   /// Information about an argument's name.
   public struct NameInfo: Codable, Hashable, Sendable {
@@ -45,8 +52,9 @@ public enum PropertyMetadataNamespace {
     }
   }
 
+  /// Uniquely identifies a property within a command by path and name.
   public struct PropertyIdentifier: Sendable, Hashable,
-                                    CustomStringConvertible
+                                     CustomStringConvertible
   {
     public let name: String
     public let path: [String]
@@ -63,7 +71,7 @@ public enum PropertyMetadataNamespace {
     }
   }
 
-  /// Metadata for a property
+  /// Metadata for a property extracted from its `ArgumentDefinition`.
   public struct PropertyMetadata {
     fileprivate init(
       argument: ArgumentDefinition,
@@ -91,7 +99,7 @@ public enum PropertyMetadataNamespace {
     public let parentTitle: String
   }
 
-  /// Metadata for a `ParsableCommand`
+  /// Metadata for a `ParsableCommand` extracted from its configuration.
   public struct CommandMetadata {
     fileprivate init(
       name: String, abstract: String, discussion: String)
@@ -121,22 +129,26 @@ public enum PropertyMetadataNamespace {
   // because we need to access the Element and Wrapped associated type
   // easily in the parser.
 
+  /// Metadata/value container for `Argument<[Element]>`.
   public struct ArgumentArray<Element>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let strategy: ArgumentArrayParsingStrategy
     public let value: [Element]?
   }
 
+  /// Metadata/value container for `Argument<Wrapped?>`.
   public struct ArgumentOptional<Wrapped>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let value: Wrapped??
   }
 
+  /// Metadata/value container for `Argument<Value>`.
   public struct ArgumentValue<Value>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let value: Value?
   }
 
+  /// Metadata/value container for `Option<[Element]>` with array strategy.
   public struct OptionArray<Element>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let strategy: ArrayParsingStrategy
@@ -144,6 +156,7 @@ public enum PropertyMetadataNamespace {
     public let value: [Element]?
   }
 
+  /// Metadata/value container for `Option<Wrapped?>` with single-value strategy.
   public struct OptionOptional<Wrapped>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let strategy: SingleValueParsingStrategy
@@ -151,6 +164,7 @@ public enum PropertyMetadataNamespace {
     public let value: Wrapped??
   }
 
+  /// Metadata/value container for `Option<Value>` with single-value strategy.
   public struct OptionValue<Value>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let strategy: SingleValueParsingStrategy
@@ -158,6 +172,7 @@ public enum PropertyMetadataNamespace {
     public let value: Value?
   }
 
+  /// Metadata/value container for `Flag<[EnumerableFlag]>`.
   public struct EnumerableFlagArray<Element>: PropertyWrapper
   where Element: EnumerableFlag
   {
@@ -166,6 +181,7 @@ public enum PropertyMetadataNamespace {
     public let value: [Element]?
   }
 
+  /// Metadata/value container for `Flag<Wrapped?>` where `Wrapped: EnumerableFlag`.
   public struct EnumerableFlagOptional<Wrapped>: PropertyWrapper
   where Wrapped: EnumerableFlag
   {
@@ -174,6 +190,7 @@ public enum PropertyMetadataNamespace {
     public let value: Wrapped??
   }
 
+  /// Metadata/value container for `Flag<Value>` where `Value: EnumerableFlag`.
   public struct EnumerableFlagValue<Value>: PropertyWrapper
   where Value: EnumerableFlag
   {
@@ -182,6 +199,7 @@ public enum PropertyMetadataNamespace {
     public let value: Value?
   }
 
+  /// Metadata/value container for `Flag<Value>` (non-enumerable).
   public struct FlagValue<Value>: PropertyWrapper {
     public let metadata: PropertyMetadata
     public let preferredName: NameInfo?
@@ -194,6 +212,9 @@ public enum PropertyMetadataNamespace {
 ///
 /// We cannot put protocols into a enum, so we have to pollute the global
 /// namespace.
+/// Protocol to traverse a `ParsableCommand` type and produce metadata objects
+/// for each property and group. Default implementations are provided for
+/// walking the type and extracting names/initial values.
 public protocol PropertyMetadataParser {
   /// Parser should return an object of this type for each property instance.
   associatedtype Property
@@ -296,6 +317,9 @@ private typealias PropertyInfo = PropertyMetadataNamespace.PropertyMetadata
 private typealias NameInfo = PropertyMetadataNamespace.NameInfo
 
 extension NameInfo {
+  /// Convert internal `Name` (parser representation) into public
+  /// `NameInfo`. We normalize the shape so clients do not depend on
+  /// internal enums and keep only two fields: `kind` and `name`.
   fileprivate init(name: Name) {
     switch name {
     case let .long(n):
@@ -309,11 +333,18 @@ extension NameInfo {
 }
 
 private protocol _MetadataExtractor {
+  /// Implemented by property wrappers and groups to extract their
+  /// metadata using a uniform API. This avoids exposing concrete
+  /// wrapper types to the `PropertyMetadataParser` and keeps the
+  /// traversal generic.
   func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
 }
 
 extension _MetadataExtractor where Self: ParsedWrapper {
+  /// Find the `ArgumentDefinition` that corresponds to a property key.
+  /// We look for either a named or positional definition and ignore
+  /// entries that represent default values.
   fileprivate func _argument(for key: InputKey) -> ArgumentDefinition? {
     argumentSet(for: key).first { argument in
       switch argument.kind {
@@ -323,6 +354,12 @@ extension _MetadataExtractor where Self: ParsedWrapper {
     }
   }
 
+  /// Attempt to compute the initial value for a property by invoking
+  /// the wrapper's `initial` closure against an empty `ParsedValues`.
+  ///
+  /// This leverages the parser's own defaulting rules instead of
+  /// duplicating them. If any failure occurs, we treat it as absence
+  /// of initial value and return `nil`.
   fileprivate func _initialValue(
     argument: ArgumentDefinition, for key: InputKey) -> Value?
   {
@@ -337,6 +374,9 @@ extension _MetadataExtractor where Self: ParsedWrapper {
 }
 
 extension OptionGroup: _MetadataExtractor {
+  /// When encountering an `OptionGroup`, we synthesize a group node
+  /// using the current key and the group's title, then recurse into
+  /// the group's fields to gather child properties.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
   {
@@ -348,6 +388,10 @@ extension OptionGroup: _MetadataExtractor {
 }
 
 private protocol _Array {
+  /// Bridge arrays for both Argument and Option cases. This protocol
+  /// allows us to dispatch based on the array's element type while
+  /// preserving the difference between Argument strategies and
+  /// Option strategies.
   static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     strategy: ArgumentArrayParsingStrategy,
@@ -369,6 +413,8 @@ private protocol _Array {
 }
 
 private protocol _EnumerableFlagArray {
+  /// Bridge arrays of `EnumerableFlag` values. Each case corresponds
+  /// to a concrete wrapper emitted to the parser.
   static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -380,6 +426,8 @@ private protocol _EnumerableFlagArray {
 }
 
 extension Array: _Array {
+  /// Emit an `ArgumentArray` wrapper without an initial value. Used
+  /// when no default is present for an array argument.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     strategy: ArgumentArrayParsingStrategy,
@@ -389,6 +437,8 @@ extension Array: _Array {
     try parser.parse(PropertyMetadataNamespace.ArgumentArray(
       metadata: argument, strategy: strategy, value: nil as Self?))
   }
+  /// Emit an `ArgumentArray` wrapper with the initial value captured
+  /// from the property wrapper instance.
   fileprivate func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     strategy: ArgumentArrayParsingStrategy,
@@ -398,6 +448,7 @@ extension Array: _Array {
     try parser.parse(PropertyMetadataNamespace.ArgumentArray(
       metadata: argument, strategy: strategy, value: self))
   }
+  /// Emit an `OptionArray` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
@@ -409,6 +460,8 @@ extension Array: _Array {
       metadata: option, strategy: strategy, preferredName: preferredName,
       value: nil as Self?))
   }
+  /// Emit an `OptionArray` wrapper with the initial value captured
+  /// from the property wrapper instance.
   fileprivate func _parse<P: PropertyMetadataParser>(
     option: PropertyInfo,
     strategy: ArrayParsingStrategy,
@@ -423,6 +476,7 @@ extension Array: _Array {
 }
 
 extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
+  /// Emit an `EnumerableFlagArray` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -432,6 +486,7 @@ extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
       metadata: enumerableFlag, names: Element._names,
       value: nil as Self?))
   }
+  /// Emit an `EnumerableFlagArray` wrapper with the initial value.
   fileprivate func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -444,6 +499,9 @@ extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
 }
 
 private protocol _Optional {
+  /// Bridge optionals for both Argument and Option cases. We separate
+  /// the array vs value strategies and carry preferred names for
+  /// options to support formatter construction.
   static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     with parser: P) throws -> P.Property
@@ -463,6 +521,7 @@ private protocol _Optional {
 }
 
 private protocol _EnumerableFlagOptional {
+  /// Bridge optional `EnumerableFlag` values for flag wrappers.
   static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -474,6 +533,7 @@ private protocol _EnumerableFlagOptional {
 }
 
 extension Optional: _Optional {
+  /// Emit an `ArgumentOptional` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     with parser: P)
@@ -482,6 +542,7 @@ extension Optional: _Optional {
     try parser.parse(PropertyMetadataNamespace.ArgumentOptional(
       metadata: argument, value: nil as Self?))
   }
+  /// Emit an `ArgumentOptional` wrapper with the initial value.
   fileprivate func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     with parser: P)
@@ -490,6 +551,7 @@ extension Optional: _Optional {
     try parser.parse(PropertyMetadataNamespace.ArgumentOptional(
       metadata: argument, value: self))
   }
+  /// Emit an `OptionOptional` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
@@ -501,6 +563,7 @@ extension Optional: _Optional {
       metadata: option, strategy: strategy, preferredName: preferredName,
       value: nil as Self?))
   }
+  /// Emit an `OptionOptional` wrapper with the initial value.
   fileprivate func _parse<P: PropertyMetadataParser>(
     option: PropertyInfo,
     strategy: SingleValueParsingStrategy,
@@ -515,6 +578,7 @@ extension Optional: _Optional {
 }
 
 extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
+  /// Emit an `EnumerableFlagOptional` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -524,6 +588,7 @@ extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
       metadata: enumerableFlag, names: Wrapped._names,
       value: nil as Self?))
   }
+  /// Emit an `EnumerableFlagOptional` wrapper with the initial value.
   fileprivate func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -537,12 +602,18 @@ extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
 
 
 extension ArgumentDefinition {
+  /// Return the preferred name for an option, converted to `NameInfo`.
+  /// This is used to set option key text when building command lines.
   fileprivate var _preferredName: NameInfo? {
     names.preferredName.map(NameInfo.init)
   }
 }
 
 extension Argument: _MetadataExtractor {
+  /// Parse an `Argument` property. We determine whether the value is
+  /// array, optional, or a simple value, taking into account any
+  /// initial value produced by the wrapper. We then emit the
+  /// corresponding wrapper instance into the client parser.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
   {
@@ -583,6 +654,10 @@ extension Argument: _MetadataExtractor {
 }
 
 extension Option: _MetadataExtractor  {
+  /// Parse an `Option` property. We branch on array vs optional vs
+  /// value and pass the single-value parsing strategy and preferred
+  /// name to the emitted wrapper so downstream formatters can choose
+  /// the correct key placement.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
   {
@@ -634,6 +709,9 @@ extension Option: _MetadataExtractor  {
 }
 
 extension EnumerableFlag {
+  /// Compute display names for each enumerable flag case. The
+  /// underlying parser can provide either short or long forms. We keep
+  /// only the preferred name for each case.
   fileprivate static var _names: [NameInfo?] {
     allCases.map { item in
       name(for: item)
@@ -642,6 +720,9 @@ extension EnumerableFlag {
         .map(NameInfo.init)
     }
   }
+  /// Emit a flag value wrapper for the type itself and for an
+  /// instance, carrying the names array so clients can render one flag
+  /// per case.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P)
@@ -663,6 +744,9 @@ extension EnumerableFlag {
 }
 
 extension Flag: _MetadataExtractor  {
+  /// Parse a `Flag` property. We support three shapes in addition to
+  /// simple flags: array of cases, optional case, and single case.
+  /// If none applies, we treat it as a plain flag value.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P) throws -> P.Property?
   {
