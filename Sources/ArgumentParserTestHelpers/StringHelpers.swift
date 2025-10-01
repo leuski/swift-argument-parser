@@ -1,4 +1,4 @@
-//===----------------------------------------------------------*- swift -*-===//
+//===----------------------------------------------------------------------===//
 //
 // This source file is part of the Swift Argument Parser open source project
 //
@@ -11,7 +11,7 @@
 
 extension Substring {
   func trimmed() -> Substring {
-    guard let i = lastIndex(where: { $0 != " "}) else {
+    guard let i = lastIndex(where: { $0 != " " }) else {
       return ""
     }
     return self[...i]
@@ -20,9 +20,15 @@ extension Substring {
 
 extension String {
   public func trimmingLines() -> String {
-    return self
+    self
       .split(separator: "\n", omittingEmptySubsequences: false)
       .map { $0.trimmed() }
       .joined(separator: "\n")
+  }
+
+  public func normalizingLineEndings() -> String {
+    self
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
   }
 }
