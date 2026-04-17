@@ -32,7 +32,10 @@ var package = Package(
       name: "ArgumentParser",
       dependencies: ["ArgumentParserToolInfo"],
       exclude: ["CMakeLists.txt"],
-      swiftSettings: [.enableExperimentalFeature("StrictConcurrency")]),
+      swiftSettings: [
+        .enableExperimentalFeature("StrictConcurrency"),
+        .unsafeFlags(["-suppress-warnings"]),
+      ]),
     .target(
       name: "ArgumentParserTestHelpers",
       dependencies: ["ArgumentParser", "ArgumentParserToolInfo"],
