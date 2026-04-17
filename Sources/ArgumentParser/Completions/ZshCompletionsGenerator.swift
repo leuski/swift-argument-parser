@@ -9,7 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if swift(>=6.0)
+#if compiler(>=6.0)
 internal import ArgumentParserToolInfo
 #else
 import ArgumentParserToolInfo
@@ -53,15 +53,63 @@ extension CommandInfoV0 {
     }
 
     \(completionFunctions)\
-    \(completionFunctionName)
+    if [[ "${funcstack[1]}" = \(completionFunctionName) ]]; then
+        \(completionFunctionName) "${@}"
+    else
+        compdef \(completionFunctionName) \(commandName)
+    fi
     """
   }
 
   private var completionFunctions: String {
     let functionName = completionFunctionName
 
-    let argumentSpecsAndSetupScripts = (arguments ?? []).compactMap {
-      argumentSpecAndSetupScript($0)
+    var repeatingPositionalIndicator = ""
+    let argumentSpecsAndSetupScripts = (arguments ?? []).compactMap { arg in
+      guard arg.shouldDisplay else {
+        return nil as (argumentSpec: String, setupScript: String?)?
+      }
+
+      let line: String
+      let names = arg.names ?? []
+      switch names.count {
+      case 0:
+        guard repeatingPositionalIndicator.isEmpty else {
+          return nil
+        }
+
+        if arg.isRepeating {
+          repeatingPositionalIndicator = "*"
+        }
+        line = repeatingPositionalIndicator
+      case 1:
+        // swift-format-ignore: NeverForceUnwrap
+        // Preconditions: names has exactly one element.
+        line = """
+          \(arg.isRepeatingOption ? "*" : "")\(names.first!.commonCompletionSynopsisString().zshEscapeForSingleQuotedOptionSpec())\(arg.completionAbstract)
+          """
+      default:
+        let synopses = names.map {
+          $0.commonCompletionSynopsisString()
+            .zshEscapeForSingleQuotedOptionSpec()
+        }
+        line = """
+          \(arg.isRepeatingOption ? "*" : "(\(synopses.joined(separator: " ")))")'\
+          {\(synopses.joined(separator: ","))}\
+          '\(arg.completionAbstract)
+          """
+      }
+
+      switch arg.kind {
+      case .option, .positional:
+        let (argumentAction, setupScript) = argumentActionAndSetupScript(arg)
+        return (
+          "'\(line):\(arg.valueName?.zshEscapeForSingleQuotedOptionSpec() ?? ""):\(argumentAction)'",
+          setupScript
+        )
+      case .flag:
+        return ("'\(line)'", nil)
+      }
     }
     var argumentSpecs = argumentSpecsAndSetupScripts.map(\.argumentSpec)
     let setupScripts = argumentSpecsAndSetupScripts.compactMap(\.setupScript)
@@ -87,12 +135,12 @@ extension CommandInfoV0 {
           .joined(separator: "\n")
         )
                 )
-                _describe -V subcommand subcommands
+                _describe -V subcommand subcommands && ret=0
                 ;;
             arg)
                 case "${words[1]}" in
                 \(subcommands.map(\.commandName).joined(separator: "|")))
-                    "\(functionName)_${words[1]}"
+                    "\(functionName)_${words[1]}" && ret=0
                     ;;
                 esac
                 ;;
@@ -109,10 +157,10 @@ extension CommandInfoV0 {
               setopt extendedglob nullglob numericglobsort
               unsetopt aliases banghist
 
-              local -xr \(CompletionShell.shellEnvironmentVariableName)=zsh
-              local -x \(CompletionShell.shellVersionEnvironmentVariableName)
-              \(CompletionShell.shellVersionEnvironmentVariableName)="$(builtin emulate zsh -c 'printf %s "${ZSH_VERSION}"')"
-              local -r \(CompletionShell.shellVersionEnvironmentVariableName)
+              local -xr \(Platform.Environment.Key.shellName.rawValue)=zsh
+              local -x \(Platform.Environment.Key.shellVersion.rawValue)
+              \(Platform.Environment.Key.shellVersion.rawValue)="$(builtin emulate zsh -c 'printf %s "${ZSH_VERSION}"')"
+              local -r \(Platform.Environment.Key.shellVersion.rawValue)
 
               local context state state_descr line
               local -A opt_args
@@ -137,45 +185,6 @@ extension CommandInfoV0 {
 
       \(subcommands.map(\.completionFunctions).joined())
       """
-  }
-
-  private func argumentSpecAndSetupScript(
-    _ arg: ArgumentInfoV0
-  ) -> (argumentSpec: String, setupScript: String?)? {
-    guard arg.shouldDisplay else { return nil }
-
-    let line: String
-    let names = arg.names ?? []
-    switch names.count {
-    case 0:
-      line = arg.isRepeating ? "*" : ""
-    case 1:
-      // swift-format-ignore: NeverForceUnwrap
-      // Preconditions: names has exactly one element.
-      line = """
-        \(arg.isRepeatingOption ? "*" : "")\(names.first!.commonCompletionSynopsisString().zshEscapeForSingleQuotedOptionSpec())\(arg.completionAbstract)
-        """
-    default:
-      let synopses = names.map {
-        $0.commonCompletionSynopsisString().zshEscapeForSingleQuotedOptionSpec()
-      }
-      line = """
-        \(arg.isRepeatingOption ? "*" : "(\(synopses.joined(separator: " ")))")'\
-        {\(synopses.joined(separator: ","))}\
-        '\(arg.completionAbstract)
-        """
-    }
-
-    switch arg.kind {
-    case .option, .positional:
-      let (argumentAction, setupScript) = argumentActionAndSetupScript(arg)
-      return (
-        "'\(line):\(arg.valueName?.zshEscapeForSingleQuotedOptionSpec() ?? ""):\(argumentAction)'",
-        setupScript
-      )
-    case .flag:
-      return ("'\(line)'", nil)
-    }
   }
 
   /// Returns the zsh "action" for an argument completion string.
@@ -269,19 +278,17 @@ extension ArgumentInfoV0 {
 
 extension String {
   fileprivate func zshEscapeForSingleQuotedDescribeCompletion() -> String {
-    replacingOccurrences(
-      of: #"[:\\]"#,
-      with: #"\\$0"#,
-      options: .regularExpression
-    )
-    .shellEscapeForSingleQuotedString()
+    self
+      .replacing("\\", with: "\\\\")
+      .replacing(":", with: "\\:")
+      .shellEscapeForSingleQuotedString()
   }
   fileprivate func zshEscapeForSingleQuotedOptionSpec() -> String {
-    replacingOccurrences(
-      of: #"[:\\\[\]]"#,
-      with: #"\\$0"#,
-      options: .regularExpression
-    )
-    .shellEscapeForSingleQuotedString()
+    self
+      .replacing("\\", with: "\\\\")
+      .replacing(":", with: "\\:")
+      .replacing("[", with: "\\[")
+      .replacing("]", with: "\\]")
+      .shellEscapeForSingleQuotedString()
   }
 }

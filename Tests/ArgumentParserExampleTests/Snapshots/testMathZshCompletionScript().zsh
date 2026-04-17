@@ -55,12 +55,12 @@ _math() {
             'stats:Calculate descriptive statistics.'
             'help:Show subcommand help information.'
         )
-        _describe -V subcommand subcommands
+        _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
         add|multiply|stats|help)
-            "_math_${words[1]}"
+            "_math_${words[1]}" && ret=0
             ;;
         esac
         ;;
@@ -111,12 +111,12 @@ _math_stats() {
             'stdev:Print the standard deviation of the values.'
             'quantiles:Print the quantiles of the values (TBD).'
         )
-        _describe -V subcommand subcommands
+        _describe -V subcommand subcommands && ret=0
         ;;
     arg)
         case "${words[1]}" in
         average|stdev|quantiles)
-            "_math_stats_${words[1]}"
+            "_math_stats_${words[1]}" && ret=0
             ;;
         esac
         ;;
@@ -161,7 +161,7 @@ _math_stats_quantiles() {
         '*:values:'
         '--file:file:_files -g '\''*.txt *.md'\'''
         '--directory:directory:_files -/'
-        '--shell:shell:{local -a list;list=(${(f)"$(head -100 /usr/share/dict/words | tail -50)"});_describe -V "" list}'
+        '--shell:shell:{local -a list;list=(${(f)"$(head -100 '\''/usr/share/dict/words'\'' | tail -50)"});_describe -V "" list}'
         '--custom:custom:{__math_custom_complete ---completion stats quantiles -- --custom "${current_word_index}" "$(__math_cursor_index_in_current_word)"}'
         '--custom-deprecated:custom-deprecated:{__math_custom_complete ---completion stats quantiles -- --custom-deprecated}'
         '--version[Show the version.]'
@@ -183,4 +183,8 @@ _math_help() {
     return "${ret}"
 }
 
-_math
+if [[ "${funcstack[1]}" = _math ]]; then
+    _math "${@}"
+else
+    compdef _math math
+fi

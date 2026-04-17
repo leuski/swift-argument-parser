@@ -9,14 +9,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if swift(>=6.0)
+#if compiler(>=6.0)
+#if canImport(Dispatch)
 @preconcurrency private import class Dispatch.DispatchSemaphore
-internal import class Foundation.NSLock
-internal import class Foundation.ProcessInfo
+#endif
 #else
+#if canImport(Dispatch)
 @preconcurrency import class Dispatch.DispatchSemaphore
-import class Foundation.NSLock
-import class Foundation.ProcessInfo
+#endif
 #endif
 
 struct CommandError: Error {
@@ -38,7 +38,13 @@ struct CommandParser {
   }
 
   var commandStack: [ParsableCommand.Type] {
-    let result = decodedArguments.compactMap { $0.commandType }
+    // Filter to only include types that exist in the command tree.
+    // This prevents @OptionGroup types that happen to conform to
+    // ParsableCommand from being included in the command stack (#578).
+    let result =
+      decodedArguments
+      .compactMap { $0.commandType }
+      .filter { !commandTree.path(to: $0).isEmpty }
     if currentNode.element == result.last {
       return result
     } else {
@@ -104,14 +110,30 @@ extension CommandParser {
   /// - Parameters:
   ///   - split: The remaining arguments to examine.
   ///   - requireSoloArgument: `true` if the built-in flag must be the only
-  ///     one remaining for this to catch it.
+  ///     input argument remaining for this to catch it.
   ///
   /// - Throws: If a built-in flag is found.
   func checkForBuiltInFlags(
     _ split: SplitArguments,
     requireSoloArgument: Bool = false
   ) throws {
-    guard !requireSoloArgument || split.originalInput.count == 1 else { return }
+    if requireSoloArgument {
+      // If we require exactly one input argument, then we require at least one
+      // parsed argument. But we also allow more than one parsed argument
+      // because certain arguments (such `-help`) get parsed as multiple
+      // arguments (in this case [-help, -h, -e, -l, -p]).
+      guard split.count >= 1 else { return }
+
+      // Require that all remaining parsed arguments came from the same input
+      // argument.
+      let originIndex = split.elements[split.elements.startIndex].index
+        .inputIndex
+      for element in split.elements {
+        guard element.index.inputIndex == originIndex else {
+          return
+        }
+      }
+    }
 
     // Look for help flags
     guard
@@ -451,16 +473,13 @@ extension CommandParser {
     _ argument: ArgumentDefinition,
     forArguments args: [String]
   ) throws {
-    let environment = ProcessInfo.processInfo.environment
-    if let completionShellName = environment[
-      CompletionShell.shellEnvironmentVariableName]
-    {
+    if let completionShellName = Platform.Environment[.shellName] {
       let shell = CompletionShell(rawValue: completionShellName)
       CompletionShell._requesting.withLock { $0 = shell }
     }
 
     CompletionShell._requestingVersion.withLock {
-      $0 = environment[CompletionShell.shellVersionEnvironmentVariableName]
+      $0 = Platform.Environment[.shellVersion]
     }
 
     let completions: [String]
@@ -474,12 +493,16 @@ extension CommandParser {
         completingPrefix
       )
     case .customAsync(let complete):
+      #if canImport(Dispatch)
       if #available(macOS 10.15, macCatalyst 13, iOS 13, tvOS 13, watchOS 6, *)
       {
         completions = try asyncCustomCompletions(from: args, complete: complete)
       } else {
         throw ParserError.invalidState
       }
+      #else
+      throw ParserError.invalidState
+      #endif
     case .customDeprecated(let complete):
       completions = complete(args)
     default:
@@ -528,6 +551,16 @@ private func parseCustomCompletionArguments(
   return (Array(args), completingArgumentIndex, completingPrefix)
 }
 
+#if !canImport(Dispatch)
+@available(*, unavailable, message: "DispatchSemaphore is unavailable")
+@available(macOS 10.15, macCatalyst 13, iOS 13, tvOS 13, watchOS 6, *)
+private func asyncCustomCompletions(
+  from args: [String],
+  complete: @escaping @Sendable ([String], Int, String) async -> [String]
+) throws -> [String] {
+  throw ParserError.invalidState
+}
+#else
 @available(macOS 10.15, macCatalyst 13, iOS 13, tvOS 13, watchOS 6, *)
 private func asyncCustomCompletions(
   from args: [String],
@@ -536,44 +569,22 @@ private func asyncCustomCompletions(
   let (args, completingArgumentIndex, completingPrefix) =
     try parseCustomCompletionArguments(from: args)
 
-  let completionsBox = SendableBox<[String]>([])
+  let completionsBox = Mutex<[String]>([])
   let semaphore = DispatchSemaphore(value: 0)
 
   Task {
-    completionsBox.value = await complete(
+    let completion = await complete(
       args,
       completingArgumentIndex,
-      completingPrefix
-    )
+      completingPrefix)
+    completionsBox.withLock { $0 = completion }
     semaphore.signal()
   }
 
   semaphore.wait()
-  return completionsBox.value
+  return completionsBox.withLock { $0 }
 }
-
-// Helper class to make values sendable across concurrency boundaries
-private final class SendableBox<T>: @unchecked Sendable {
-  private let lock = NSLock()
-  private var _value: T
-
-  init(_ value: T) {
-    self._value = value
-  }
-
-  var value: T {
-    get {
-      lock.lock()
-      defer { lock.unlock() }
-      return _value
-    }
-    set {
-      lock.lock()
-      defer { lock.unlock() }
-      _value = newValue
-    }
-  }
-}
+#endif
 
 // MARK: Building Command Stacks
 
