@@ -79,7 +79,19 @@ public enum PropertyMetadataNamespace {
     {
       self.name = argument.valueName
       self.abstract = argument.help.abstract
-      self.discussion = argument.help.discussion
+      switch argument.help.discussion {
+      case .none:
+        self.discussion = ""
+      case .staticText(let string):
+        self.discussion = string
+      case .enumerated(let preamble, let expressibleByArgument):
+        self.discussion = (preamble.map { str in str + "\n" } ?? "")
+        + expressibleByArgument
+          .allValueDescriptions
+          .sorted(by: { $0.key < $1.key })
+          .map { key, value in "\(key): \(value)" }
+          .joined(separator: "\n")
+      }
       self.id = PropertyIdentifier(key: key)
       self.parentTitle = argument.help.parentTitle
     }

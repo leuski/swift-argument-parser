@@ -1,4 +1,4 @@
-//===----------------------------------------------------------*- swift -*-===//
+//===----------------------------------------------------------------------===//
 //
 // This source file is part of the Swift Argument Parser open source project
 //
@@ -18,7 +18,8 @@ struct GenerateManualPlugin: CommandPlugin {
     arguments: [String]
   ) async throws {
     // Locate generation tool.
-    let generationToolFile = try context.tool(named: "generate-manual").path
+    let generationTool = "generate-manual"
+    let generationToolFile = try context.tool(named: generationTool).path
 
     // Create an extractor to extract plugin-only arguments from the `arguments`
     // array.
@@ -27,7 +28,8 @@ struct GenerateManualPlugin: CommandPlugin {
     // Run generation tool once if help is requested.
     if extractor.helpRequest() {
       try generationToolFile.exec(arguments: ["--help"])
-      print("""
+      print(
+        """
         ADDITIONAL OPTIONS:
           --configuration <configuration>
                                   Tool build configuration used to generate the
@@ -81,7 +83,7 @@ struct GenerateManualPlugin: CommandPlugin {
       var generationToolArguments = [
         builtArtifact.path.string,
         "--output-directory",
-        outputDirectory.string
+        outputDirectory.string,
       ]
       generationToolArguments.append(
         contentsOf: extractor.remainingArguments)

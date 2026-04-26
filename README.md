@@ -18,7 +18,7 @@ struct Repeat: ParsableCommand {
     @Flag(help: "Include a counter with each repetition.")
     var includeCounter = false
 
-    @Option(name: .shortAndLong, help: "The number of times to repeat 'phrase'.")
+    @Option(name: .shortAndLong, help: "How many times to repeat 'phrase'.")
     var count: Int? = nil
 
     @Argument(help: "The phrase to repeat.")
@@ -137,7 +137,7 @@ let package = Package(
 
 ### Supported Versions
 
-The most recent versions of swift-argument-parser support Swift 5.5 and newer. The minimum Swift version supported by swift-argument-parser releases are detailed below:
+The minimum Swift version supported by swift-argument-parser releases are detailed below:
 
 swift-argument-parser | Minimum Swift Version
 ----------------------|----------------------
