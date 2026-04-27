@@ -22,6 +22,7 @@ add_library(ArgumentParser
   "Parsable Types/ExpressibleByArgument.swift"
   "Parsable Types/ParsableArguments.swift"
   "Parsable Types/ParsableCommand.swift"
+  "Parsable Types/ParsableCommand+ToolInfoV1.swift"
 
   Parsing/ArgumentDecoder.swift
   Parsing/ArgumentDefinition.swift
@@ -41,10 +42,12 @@ add_library(ArgumentParser
   Usage/MessageInfo.swift
   Usage/UsageGenerator.swift
 
+  Utilities/ArgumentInfoV1+Live.swift
   Utilities/CollectionExtensions.swift
   Utilities/Mutex.swift
   Utilities/Foundation.swift
   Utilities/Platform.swift
+  Utilities/PropertyMetadata.swift
   Utilities/SequenceExtensions.swift
   Utilities/StringExtensions.swift
   Utilities/SwiftExtensions.swift

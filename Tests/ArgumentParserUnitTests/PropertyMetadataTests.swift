@@ -1,4 +1,6 @@
+import ArgumentParserToolInfo
 import XCTest
+
 @testable import ArgumentParser
 
 private enum EF: String, EnumerableFlag, CaseIterable { case a, b, c }
@@ -104,7 +106,10 @@ final class PropertyMetadataTests: XCTestCase {
     let leaves = flatten(props)
     // name option should carry preferred long name
     if case let .leaf(_, .optionValueString(preferred)) = leaves.first(where: { node in
-      if case let .leaf(meta, _) = node { return meta.name == "name" } else { return false }
+      if case let .leaf(meta, _) = node {
+        return meta.info.preferredName?.name == "name"
+      }
+      return false
     }) {
       XCTAssertEqual(preferred?.kind, .long)
       XCTAssertEqual(preferred?.name, "name")
@@ -114,7 +119,10 @@ final class PropertyMetadataTests: XCTestCase {
 
     // enable flag should carry preferred long name
     if case let .leaf(_, .flagBool(preferred)) = leaves.first(where: { node in
-      if case let .leaf(meta, _) = node { return meta.name == "enable" } else { return false }
+      if case let .leaf(meta, _) = node {
+        return meta.info.preferredName?.name == "enable"
+      }
+      return false
     }) {
       XCTAssertEqual(preferred?.kind, .long)
       XCTAssertEqual(preferred?.name, "enable")
@@ -136,5 +144,43 @@ final class PropertyMetadataTests: XCTestCase {
     XCTAssertEqual(id.name, "flags")
     XCTAssertEqual(title, "Top")
     XCTAssertEqual(children.count, 4)
+  }
+
+  /// Slice C contract: `metadata.info` is the V1 ArgumentInfo node carried
+  /// per property, exposing the same shape the V1 dump produces. Old
+  /// fields like `metadata.name` / `metadata.parentTitle` are gone;
+  /// consumers read through `metadata.info.*`.
+  func testPropertyMetadataExposesV1Info() throws {
+    let collector = Collector()
+    let props = try collector.parse(propertiesOf: CmdTitled.self)
+    func flatten(_ nodes: [PropNode]) -> [PropNode] {
+      nodes.flatMap { node in
+        switch node {
+        case let .group(_, _, children): return flatten(children)
+        case .leaf: return [node]
+        }
+      }
+    }
+    let leaves = flatten(props)
+    let nameLeaf = leaves.first { node in
+      if case let .leaf(meta, _) = node {
+        return meta.info.preferredName?.name == "name"
+      }
+      return false
+    }
+    guard case let .leaf(meta, _) = nameLeaf else {
+      return XCTFail("Missing --name leaf")
+    }
+    XCTAssertEqual(meta.info.kind, .option)
+    // The visitor builds child argument sets via Mirror traversal of the
+    // group's value type. That construction does not run the
+    // OptionGroup-wrapper init pathway that sets `parentTitle` on each
+    // child argument, so per-property `sectionTitle` is nil here. The
+    // enclosing group node carries the title separately (asserted in
+    // `testGroupWithTitlePropagates`).
+    XCTAssertNil(meta.info.sectionTitle)
+    XCTAssertEqual(meta.info.valueName, "name")
+    XCTAssertEqual(meta.id.name, "name")
+    XCTAssertEqual(meta.id.path, ["flags"])
   }
 }
