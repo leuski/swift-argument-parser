@@ -15,7 +15,7 @@ extension Collection {
 }
 
 /// Header used to validate serialization version of an encoded ToolInfo struct.
-public struct ToolInfoHeader: Decodable {
+public struct ToolInfoHeader: Decodable, Sendable {
   /// A sentinel value indicating the version of the ToolInfo struct used to
   /// generate the serialized form.
   public var serializationVersion: Int
@@ -27,7 +27,7 @@ public struct ToolInfoHeader: Decodable {
 
 /// Top-level structure containing serialization version and information for all
 /// commands in a tool.
-public struct ToolInfoV0: Codable, Hashable {
+public struct ToolInfoV0: Codable, Hashable, Sendable {
   /// A sentinel value indicating the version of the ToolInfo struct used to
   /// generate the serialized form.
   public var serializationVersion = 0
@@ -41,7 +41,7 @@ public struct ToolInfoV0: Codable, Hashable {
 
 /// All information about a particular command, including arguments and
 /// subcommands.
-public struct CommandInfoV0: Codable, Hashable {
+public struct CommandInfoV0: Codable, Hashable, Sendable {
   /// Super commands and tools.
   public var superCommands: [String]?
   /// Command should appear in help displays.
@@ -112,11 +112,11 @@ public struct CommandInfoV0: Codable, Hashable {
 
 /// All information about a particular argument, including display names and
 /// options.
-public struct ArgumentInfoV0: Codable, Hashable {
+public struct ArgumentInfoV0: Codable, Hashable, Sendable {
   /// Information about an argument's name.
-  public struct NameInfoV0: Codable, Hashable {
+  public struct NameInfoV0: Codable, Hashable, Sendable {
     /// Kind of prefix of an argument's name.
-    public enum KindV0: String, Codable, Hashable {
+    public enum KindV0: String, Codable, Hashable, Sendable {
       /// A multi-character name preceded by two dashes.
       case long
       /// A single character name preceded by a single dash.
@@ -137,7 +137,7 @@ public struct ArgumentInfoV0: Codable, Hashable {
   }
 
   /// Kind of argument.
-  public enum KindV0: String, Codable, Hashable {
+  public enum KindV0: String, Codable, Hashable, Sendable {
     /// Argument specified as a bare value on the command line.
     case positional
     /// Argument specified as a value prefixed by a `--flag` on the command line.
@@ -146,7 +146,7 @@ public struct ArgumentInfoV0: Codable, Hashable {
     case flag
   }
 
-  public enum ParsingStrategyV0: String, Codable, Hashable {
+  public enum ParsingStrategyV0: String, Codable, Hashable, Sendable {
     /// Expect the next `SplitArguments.Element` to be a value and parse it.
     /// Will fail if the next input is an option.
     case `default`
@@ -166,7 +166,7 @@ public struct ArgumentInfoV0: Codable, Hashable {
     case allUnrecognized
   }
 
-  public enum CompletionKindV0: Codable, Hashable {
+  public enum CompletionKindV0: Codable, Hashable, Sendable {
     /// Use the specified list of completion strings.
     case list(values: [String])
     /// Complete file names with the specified extensions.
