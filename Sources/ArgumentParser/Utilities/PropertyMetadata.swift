@@ -402,6 +402,9 @@ private typealias PropertyInfo = PropertyMetadataNamespace.PropertyMetadata
 private typealias NameInfo = PropertyMetadataNamespace.NameInfo
 
 extension NameInfo {
+  /// Convert internal `Name` (parser representation) into public
+  /// `NameInfo`. We normalize the shape so clients do not depend on
+  /// internal enums and keep only two fields: `kind` and `name`.
   fileprivate init(name: Name) {
     switch name {
     case let .long(n):
@@ -415,12 +418,19 @@ extension NameInfo {
 }
 
 private protocol _MetadataExtractor {
+  /// Implemented by property wrappers and groups to extract their
+  /// metadata using a uniform API. This avoids exposing concrete
+  /// wrapper types to the `PropertyMetadataParser` and keeps the
+  /// traversal generic.
   func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P
   ) throws -> P.Property?
 }
 
 extension _MetadataExtractor where Self: ParsedWrapper {
+  /// Find the `ArgumentDefinition` that corresponds to a property key.
+  /// We look for either a named or positional definition and ignore
+  /// entries that represent default values.
   fileprivate func _argument(for key: InputKey) -> ArgumentDefinition? {
     argumentSet(for: key).first { argument in
       switch argument.kind {
@@ -430,6 +440,12 @@ extension _MetadataExtractor where Self: ParsedWrapper {
     }
   }
 
+  /// Attempt to compute the initial value for a property by invoking
+  /// the wrapper's `initial` closure against an empty `ParsedValues`.
+  ///
+  /// This leverages the parser's own defaulting rules instead of
+  /// duplicating them. If any failure occurs, we treat it as absence
+  /// of initial value and return `nil`.
   fileprivate func _initialValue(
     argument: ArgumentDefinition, for key: InputKey
   ) -> Value? {
@@ -444,6 +460,9 @@ extension _MetadataExtractor where Self: ParsedWrapper {
 }
 
 extension OptionGroup: _MetadataExtractor {
+  /// When encountering an `OptionGroup`, we synthesize a group node
+  /// using the current key and the group's title, then recurse into
+  /// the group's fields to gather child properties.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P
   ) throws -> P.Property? {
@@ -455,6 +474,10 @@ extension OptionGroup: _MetadataExtractor {
 }
 
 private protocol _Array {
+  /// Bridge arrays for both Argument and Option cases. This protocol
+  /// allows us to dispatch based on the array's element type while
+  /// preserving the difference between Argument strategies and
+  /// Option strategies.
   static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     strategy: ArgumentArrayParsingStrategy,
@@ -480,6 +503,8 @@ private protocol _Array {
 }
 
 private protocol _EnumerableFlagArray {
+  /// Bridge arrays of `EnumerableFlag` values. Each case corresponds
+  /// to a concrete wrapper emitted to the parser.
   static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P
@@ -491,6 +516,8 @@ private protocol _EnumerableFlagArray {
 }
 
 extension Array: _Array {
+  /// Emit an `ArgumentArray` wrapper without an initial value. Used
+  /// when no default is present for an array argument.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     strategy: ArgumentArrayParsingStrategy,
@@ -533,6 +560,7 @@ extension Array: _Array {
 }
 
 extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
+  /// Emit an `EnumerableFlagArray` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P
@@ -553,6 +581,9 @@ extension Array: _EnumerableFlagArray where Element: EnumerableFlag {
 }
 
 private protocol _Optional {
+  /// Bridge optionals for both Argument and Option cases. We separate
+  /// the array vs value strategies and carry preferred names for
+  /// options to support formatter construction.
   static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     with parser: P
@@ -576,6 +607,7 @@ private protocol _Optional {
 }
 
 private protocol _EnumerableFlagOptional {
+  /// Bridge optional `EnumerableFlag` values for flag wrappers.
   static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P
@@ -587,6 +619,7 @@ private protocol _EnumerableFlagOptional {
 }
 
 extension Optional: _Optional {
+  /// Emit an `ArgumentOptional` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     argument: PropertyInfo,
     with parser: P
@@ -627,6 +660,7 @@ extension Optional: _Optional {
 }
 
 extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
+  /// Emit an `EnumerableFlagOptional` wrapper without an initial value.
   fileprivate static func _parse<P: PropertyMetadataParser>(
     enumerableFlag: PropertyInfo,
     with parser: P
@@ -647,12 +681,18 @@ extension Optional: _EnumerableFlagOptional where Wrapped: EnumerableFlag {
 }
 
 extension ArgumentDefinition {
+  /// Return the preferred name for an option, converted to `NameInfo`.
+  /// This is used to set option key text when building command lines.
   fileprivate var _preferredName: NameInfo? {
     names.preferredName.map(NameInfo.init)
   }
 }
 
 extension Argument: _MetadataExtractor {
+  /// Parse an `Argument` property. We determine whether the value is
+  /// array, optional, or a simple value, taking into account any
+  /// initial value produced by the wrapper. We then emit the
+  /// corresponding wrapper instance into the client parser.
   fileprivate func _metadata<P: PropertyMetadataParser>(
     for key: InputKey, parser: P
   ) throws -> P.Property? {
@@ -745,6 +785,9 @@ extension Option: _MetadataExtractor {
 }
 
 extension EnumerableFlag {
+  /// Compute display names for each enumerable flag case. The
+  /// underlying parser can provide either short or long forms. We keep
+  /// only the preferred name for each case.
   fileprivate static var _names: [NameInfo?] {
     allCases.map { item in
       name(for: item)
