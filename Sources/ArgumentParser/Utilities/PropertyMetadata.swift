@@ -5,14 +5,19 @@
 //  Created by Anton Leuski on 11/4/20.
 //
 
+#if compiler(>=6.0)
+public import ArgumentParserToolInfo
+#else
+import ArgumentParserToolInfo
+#endif
+
 /// A protocol-based visitor over the parsable property tree of a
 /// `ParsableCommand`.
 ///
 /// This file exposes a public surface that lets external tooling walk every
 /// property of a command — its `@Argument`s, `@Option`s, `@Flag`s, and
 /// nested `@OptionGroup`s — and receive a normalized description of each
-/// one, including the property's name, abstract, discussion, default value,
-/// and (where applicable) parsing strategy and preferred name.
+/// one, anchored on a per-property `ArgumentInfoV1` node.
 ///
 /// Conform a type to ``PropertyMetadataParser`` and call
 /// ``PropertyMetadataParser/parse(propertiesOf:)`` to produce a tree of
@@ -20,17 +25,15 @@
 /// generators, alternative help renderers, and programmatic introspection
 /// of parsable commands.
 ///
-/// ### Design notes
+/// ### Why V1 and not V0?
 ///
-/// `ArgumentInfoV0` (used by other ArgumentParser tooling) was considered
-/// for this purpose but rejected because:
-/// - We need each property's parsing strategy to reconstruct command lines
-///   correctly.
-/// - We obtain the initial value by asking the property to parse its
-///   default, which is more reliable than reading `defaultValue` from
-///   `ArgumentInfoV0`.
-/// - We derive the property identifier from the variable name discovered
-///   via `Mirror`, not from the info structure.
+/// V1 carries source-declaration order through `CommandChildV1`, decouples
+/// `allValueDescriptions` from `discussion`, and is `Sendable`. The visitor
+/// uses V1's per-property struct so consumers can work with the same shape
+/// the tool-info dump produces. The wrapper structs additionally expose
+/// kind-specific typed strategies (`SingleValueParsingStrategy`,
+/// `ArrayParsingStrategy`) and a typed `value` field that V1 alone doesn't
+/// surface.
 
 // MARK: - Public surface
 
@@ -64,27 +67,14 @@ public protocol PropertyWrapper<Value> {
 /// is namespaced here to keep the public surface tidy.
 public enum PropertyMetadataNamespace {
   /// Information about an argument's name on the command line.
-  public struct NameInfo: Codable, Hashable, Sendable {
-    /// Kind of prefix of an argument's name.
-    public enum Kind: String, Codable, Hashable, Sendable {
-      /// A multi-character name preceded by two dashes (e.g. `--verbose`).
-      case long
-      /// A single character name preceded by a single dash (e.g. `-v`).
-      case short
-      /// A multi-character name preceded by a single dash (e.g. `-verbose`).
-      case longWithSingleDash
-    }
-
-    /// Kind of prefix this name uses.
-    public var kind: Kind
-    /// Single- or multi-character name of the argument, without the prefix.
-    public var name: String
-
-    public init(kind: Kind, name: String) {
-      self.kind = kind
-      self.name = name
-    }
-  }
+  ///
+  /// Aliased to `ArgumentInfoV1.NameInfo` (which itself aliases
+  /// `ArgumentInfoV0.NameInfoV0`). Consumers reading `name.kind` and
+  /// `name.name` see no shape change. Consumers that referenced the
+  /// nested `NameInfo.Kind` type now reach it as
+  /// `ArgumentInfoV0.NameInfoV0.KindV0` (the case shorthands `.long`,
+  /// `.short`, `.longWithSingleDash` still work).
+  public typealias NameInfo = ArgumentInfoV1.NameInfo
 
   /// A unique identifier for a property within a command.
   ///
@@ -115,60 +105,41 @@ public enum PropertyMetadataNamespace {
     }
   }
 
-  /// Description of a single parsable property — its name, help text, and
-  /// identifier. Shared by every ``PropertyWrapper`` kind.
+  /// Description of a single parsable property, anchored on its
+  /// `ArgumentInfoV1` node and a stable `id`.
+  ///
+  /// Old fields like `metadata.name`, `metadata.abstract`,
+  /// `metadata.discussion`, and `metadata.parentTitle` have been removed
+  /// — read them from `metadata.info.valueName`,
+  /// `metadata.info.abstract`, `metadata.info.discussion`, and
+  /// `metadata.info.sectionTitle` respectively. The optionality of
+  /// the new fields is intentional: V0's required-`String` form
+  /// represented absence as `""`; V1 represents it as `nil`.
   public struct PropertyMetadata: Sendable, Hashable {
-    fileprivate init(argument: ArgumentDefinition, key: InputKey) {
-      self.name = argument.valueName
-      self.abstract = argument.help.abstract
-      switch argument.help.discussion {
-      case .none:
-        self.discussion = ""
-      case .staticText(let string):
-        self.discussion = string
-      case .enumerated(let preamble, let expressibleByArgument):
-        self.discussion = (preamble.map { str in str + "\n" } ?? "")
-          + expressibleByArgument
-            .allValueDescriptions
-            .sorted(by: { $0.key < $1.key })
-            .map { key, value in "\(key): \(value)" }
-            .joined(separator: "\n")
-      }
-      self.id = PropertyIdentifier(key: key)
-      self.parentTitle = argument.help.parentTitle
-    }
-
-    /// The property's display name (its `valueName`).
-    public let name: String
-    /// Short help text from the property's `help:` parameter. Empty if
-    /// none was provided.
-    public let abstract: String
-    /// Long discussion text from the property's `help:` parameter. Empty
-    /// if none was provided. For `ExpressibleByArgument` enum properties
-    /// the discussion is the enumerated list of allowable values.
-    public let discussion: String
     /// Stable identifier for this property within its command.
     public let id: PropertyIdentifier
-    /// Title of the enclosing `@OptionGroup`, or empty if the property is
-    /// declared directly on the command.
-    public let parentTitle: String
-  }
+    /// V1 description of the property — names, kind, discussion, default
+    /// value, allowed values, completion kind, etc.
+    public let info: ArgumentInfoV1
 
-  /// Description of a `ParsableCommand` type — its name and help text.
-  public struct CommandMetadata: Sendable, Hashable {
-    fileprivate init(name: String, abstract: String, discussion: String) {
-      self.name = name
-      self.abstract = abstract
-      self.discussion = discussion
+    public init(id: PropertyIdentifier, info: ArgumentInfoV1) {
+      self.id = id
+      self.info = info
     }
 
-    /// The command's `_commandName`.
-    public let name: String
-    /// Short help text from the command's configuration. Empty if none.
-    public let abstract: String
-    /// Long discussion text from the command's configuration. Empty if
-    /// none.
-    public let discussion: String
+    fileprivate init(argument: ArgumentDefinition, key: InputKey) {
+      self.id = PropertyIdentifier(key: key)
+      // The visitor only constructs PropertyMetadata for arguments whose
+      // `kind` is `.named` or `.positional`, never `.default`. The V1 init
+      // returns nil only for `.default`, so the force-unwrap is safe by
+      // construction.
+      guard let info = ArgumentInfoV1(argument: argument) else {
+        preconditionFailure(
+          "PropertyMetadata constructed for an ArgumentDefinition with "
+          + "kind == .default; the visitor should have filtered it out.")
+      }
+      self.info = info
+    }
   }
 
   // The wrapper structs below mirror the cases of @Argument, @Option, and
@@ -303,8 +274,6 @@ public protocol PropertyMetadataParser {
   /// The parser-specific representation built for each property.
   associatedtype Property
 
-  /// Convenience reference to ``PropertyMetadataNamespace/CommandMetadata``.
-  typealias CommandMetadata = PropertyMetadataNamespace.CommandMetadata
   /// Convenience reference to
   /// ``PropertyMetadataNamespace/PropertyIdentifier``.
   typealias PropertyIdentifier = PropertyMetadataNamespace.PropertyIdentifier
@@ -351,13 +320,6 @@ public protocol PropertyMetadataParser {
   /// - Parameter commandStack: the command stack.
   /// - Returns: command names.
   func commands(commandStack: [ParsableCommand.Type]) -> [String]
-
-  /// Returns a `ParsableCommand` type's metadata.
-  ///
-  /// Default implementation provided.
-  /// - Parameter command: the command type.
-  /// - Returns: the type metadata.
-  func info(of command: ParsableCommand.Type) -> CommandMetadata
 }
 
 extension PropertyMetadataParser {
@@ -387,35 +349,12 @@ extension PropertyMetadataParser {
     else { return commands }
     return [superName] + commands
   }
-
-  public func info(of command: ParsableCommand.Type) -> CommandMetadata {
-    CommandMetadata(
-      name: command._commandName,
-      abstract: command.configuration.abstract,
-      discussion: command.configuration.discussion)
-  }
 }
 
 // MARK: - Internal implementation
 
 private typealias PropertyInfo = PropertyMetadataNamespace.PropertyMetadata
 private typealias NameInfo = PropertyMetadataNamespace.NameInfo
-
-extension NameInfo {
-  /// Convert internal `Name` (parser representation) into public
-  /// `NameInfo`. We normalize the shape so clients do not depend on
-  /// internal enums and keep only two fields: `kind` and `name`.
-  fileprivate init(name: Name) {
-    switch name {
-    case let .long(n):
-      self.init(kind: .long, name: n)
-    case let .short(n, _):
-      self.init(kind: .short, name: String(n))
-    case let .longWithSingleDash(n):
-      self.init(kind: .longWithSingleDash, name: n)
-    }
-  }
-}
 
 private protocol _MetadataExtractor {
   /// Implemented by property wrappers and groups to extract their
