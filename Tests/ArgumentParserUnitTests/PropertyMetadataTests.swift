@@ -81,11 +81,6 @@ final class PropertyMetadataTests: XCTestCase {
     XCTAssertEqual(title, "")
     XCTAssertEqual(children.count, 1)
 
-    let info = collector.info(of: Cmd.self)
-    XCTAssertEqual(info.name, "cmd")
-    XCTAssertEqual(info.abstract, "A cmd")
-    XCTAssertEqual(info.discussion, "Discuss")
-
     let names = collector.commands(commandStack: [Cmd.self])
     XCTAssertEqual(names, ["cmd"])
   }

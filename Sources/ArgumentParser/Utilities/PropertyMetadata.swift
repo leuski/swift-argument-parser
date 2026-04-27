@@ -142,23 +142,6 @@ public enum PropertyMetadataNamespace {
     }
   }
 
-  /// Description of a `ParsableCommand` type — its name and help text.
-  public struct CommandMetadata: Sendable, Hashable {
-    fileprivate init(name: String, abstract: String, discussion: String) {
-      self.name = name
-      self.abstract = abstract
-      self.discussion = discussion
-    }
-
-    /// The command's `_commandName`.
-    public let name: String
-    /// Short help text from the command's configuration. Empty if none.
-    public let abstract: String
-    /// Long discussion text from the command's configuration. Empty if
-    /// none.
-    public let discussion: String
-  }
-
   // The wrapper structs below mirror the cases of @Argument, @Option, and
   // @Flag. Each public Argument/Option/Flag type supports several distinct
   // shapes — a regular value, an array, an optional, and (for @Flag) an
@@ -291,8 +274,6 @@ public protocol PropertyMetadataParser {
   /// The parser-specific representation built for each property.
   associatedtype Property
 
-  /// Convenience reference to ``PropertyMetadataNamespace/CommandMetadata``.
-  typealias CommandMetadata = PropertyMetadataNamespace.CommandMetadata
   /// Convenience reference to
   /// ``PropertyMetadataNamespace/PropertyIdentifier``.
   typealias PropertyIdentifier = PropertyMetadataNamespace.PropertyIdentifier
@@ -339,13 +320,6 @@ public protocol PropertyMetadataParser {
   /// - Parameter commandStack: the command stack.
   /// - Returns: command names.
   func commands(commandStack: [ParsableCommand.Type]) -> [String]
-
-  /// Returns a `ParsableCommand` type's metadata.
-  ///
-  /// Default implementation provided.
-  /// - Parameter command: the command type.
-  /// - Returns: the type metadata.
-  func info(of command: ParsableCommand.Type) -> CommandMetadata
 }
 
 extension PropertyMetadataParser {
@@ -374,13 +348,6 @@ extension PropertyMetadataParser {
     guard let superName = commandStack.first?.configuration._superCommandName
     else { return commands }
     return [superName] + commands
-  }
-
-  public func info(of command: ParsableCommand.Type) -> CommandMetadata {
-    CommandMetadata(
-      name: command._commandName,
-      abstract: command.configuration.abstract,
-      discussion: command.configuration.discussion)
   }
 }
 
