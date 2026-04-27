@@ -154,7 +154,7 @@ extension ArgumentInfoV0 {
 }
 
 extension ArgumentInfoV0.KindV0 {
-  fileprivate init?(argument: ArgumentDefinition) {
+  internal init?(argument: ArgumentDefinition) {
     switch argument.kind {
     case .named:
       switch argument.update {
@@ -172,7 +172,7 @@ extension ArgumentInfoV0.KindV0 {
 }
 
 extension ArgumentInfoV0.ParsingStrategyV0 {
-  fileprivate init(argument: ArgumentDefinition) {
+  internal init(argument: ArgumentDefinition) {
     switch argument.parsingStrategy {
     case .`default`:
       self = .default
@@ -193,7 +193,7 @@ extension ArgumentInfoV0.ParsingStrategyV0 {
 }
 
 extension ArgumentInfoV0.NameInfoV0 {
-  fileprivate init(name: Name) {
+  internal init(name: Name) {
     switch name {
     case .long(let n):
       self.init(kind: .long, name: n)
@@ -206,7 +206,7 @@ extension ArgumentInfoV0.NameInfoV0 {
 }
 
 extension ArgumentInfoV0.CompletionKindV0 {
-  fileprivate init?(completion: CompletionKind) {
+  internal init?(completion: CompletionKind) {
     switch completion.kind {
     case .`default`:
       return nil
@@ -330,47 +330,7 @@ extension CommandChildV1 {
   }
 }
 
-extension ArgumentInfoV1 {
-  fileprivate init?(argument: ArgumentDefinition) {
-    guard let kind = ArgumentInfoV1.Kind(argument: argument) else {
-      return nil
-    }
-
-    let discussion: String?
-    let allValueDescriptions: [String: String]?
-    switch argument.help.discussion {
-    case .none:
-      discussion = nil
-      allValueDescriptions = nil
-    case .staticText(let text):
-      discussion = text
-      allValueDescriptions = nil
-    case .enumerated(let text, let options):
-      discussion = text
-      allValueDescriptions = options.allValueDescriptions
-    }
-
-    let parentTitle = argument.help.parentTitle
-    self.init(
-      kind: kind,
-      shouldDisplay: argument.help.visibility.base == .default,
-      sectionTitle: parentTitle.isEmpty ? nil : parentTitle,
-      isOptional: argument.help.options.contains(.isOptional),
-      isRepeating: argument.help.options.contains(.isRepeating),
-      parsingStrategy: ArgumentInfoV1.ParsingStrategy(argument: argument),
-      names: argument.names.isEmpty
-        ? nil : argument.names.map(ArgumentInfoV1.NameInfo.init),
-      preferredName: argument.names.preferredName.map(
-        ArgumentInfoV1.NameInfo.init),
-      valueName: argument.valueName.isEmpty ? nil : argument.valueName,
-      defaultValue: argument.help.defaultValue,
-      allValueStrings: argument.help.allValueStrings.isEmpty
-        ? nil : argument.help.allValueStrings,
-      allValueDescriptions: allValueDescriptions,
-      completionKind: ArgumentInfoV1.CompletionKind(
-        completion: argument.completion),
-      abstract: argument.help.abstract.isEmpty
-        ? nil : argument.help.abstract,
-      discussion: discussion)
-  }
-}
+// `ArgumentInfoV1.init?(argument:)` lives in
+// `Sources/ArgumentParser/Utilities/ArgumentInfoV1+Live.swift` so the
+// typed visitor and the dump generator can both construct V1 nodes from
+// the same source.
